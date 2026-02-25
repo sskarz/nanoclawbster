@@ -38,6 +38,10 @@ vi.mock('discord.js', () => {
     DirectMessages: 8,
   };
 
+  const Partials = {
+    Channel: 0,
+  };
+
   class MockClient {
     eventHandlers = new Map<string, Handler[]>();
     user: any = { id: '999888777', tag: 'Andy#1234' };
@@ -90,6 +94,7 @@ vi.mock('discord.js', () => {
     Client: MockClient,
     Events,
     GatewayIntentBits,
+    Partials,
     TextChannel,
   };
 });

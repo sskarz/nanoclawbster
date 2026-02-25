@@ -155,10 +155,18 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
+  // New files from the upstream src are synced in on every call so that
+  // groups created before a new file was added still receive it.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
+    // Always overwrite system-owned source files so updates (new MCP servers,
+    // bug fixes) propagate to existing groups automatically. Agents may add
+    // extra files alongside these; those are left untouched.
+    for (const file of fs.readdirSync(agentRunnerSrc)) {
+      fs.copyFileSync(path.join(agentRunnerSrc, file), path.join(groupAgentRunnerDir, file));
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -199,7 +207,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'COMPOSIO_API_KEY']);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
