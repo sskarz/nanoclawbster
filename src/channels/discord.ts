@@ -191,16 +191,32 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
 
-      // Discord has a 2000 character limit per message — split if needed
+      // Extract image URLs and strip them from the text
+      const IMAGE_URL_RE = /(https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp)(?:\?\S*)?)/gi;
+      const imageUrls = [...text.matchAll(IMAGE_URL_RE)].map((m) => m[0]);
+      const cleanText = text.replace(IMAGE_URL_RE, '').replace(/\n{3,}/g, '\n\n').trim();
+
       const MAX_LENGTH = 2000;
-      if (text.length <= MAX_LENGTH) {
-        await textChannel.send(text);
+
+      if (imageUrls.length > 0) {
+        // Send first chunk with images attached
+        const firstChunk = cleanText.slice(0, MAX_LENGTH) || undefined;
+        await textChannel.send({ content: firstChunk, files: imageUrls });
+        // Send any remaining text as plain follow-up messages
+        for (let i = MAX_LENGTH; i < cleanText.length; i += MAX_LENGTH) {
+          await textChannel.send(cleanText.slice(i, i + MAX_LENGTH));
+        }
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await textChannel.send(text.slice(i, i + MAX_LENGTH));
+        // Text-only path
+        if (cleanText.length <= MAX_LENGTH) {
+          await textChannel.send(cleanText);
+        } else {
+          for (let i = 0; i < cleanText.length; i += MAX_LENGTH) {
+            await textChannel.send(cleanText.slice(i, i + MAX_LENGTH));
+          }
         }
       }
-      logger.info({ jid, length: text.length }, 'Discord message sent');
+      logger.info({ jid, length: text.length, images: imageUrls.length }, 'Discord message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
     }
