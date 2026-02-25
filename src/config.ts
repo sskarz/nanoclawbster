@@ -9,6 +9,8 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'DISCORD_BOT_TOKEN',
+  'DISCORD_ONLY',
 ]);
 
 export const ASSISTANT_NAME =
@@ -67,3 +69,9 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Discord configuration
+export const DISCORD_BOT_TOKEN =
+  process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
+export const DISCORD_ONLY =
+  (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';

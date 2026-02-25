@@ -80,6 +80,11 @@ export class GroupQueue {
       return;
     }
 
+    // Mark active synchronously to prevent race between
+    // recoverPendingMessages() and startMessageLoop() at startup
+    state.active = true;
+    this.activeCount++;
+
     this.runForGroup(groupJid, 'messages').catch((err) =>
       logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
     );
@@ -159,6 +164,10 @@ export class GroupQueue {
       const tempPath = `${filepath}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
       fs.renameSync(tempPath, filepath);
+      // When host runs as root, chown the file so the container's node user (1000) can unlink it
+      if (process.getuid?.() === 0) {
+        try { fs.chownSync(filepath, 1000, 1000); } catch { /* best-effort */ }
+      }
       return true;
     } catch {
       return false;
@@ -175,7 +184,11 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      const closePath = path.join(inputDir, '_close');
+      fs.writeFileSync(closePath, '');
+      if (process.getuid?.() === 0) {
+        try { fs.chownSync(closePath, 1000, 1000); } catch { /* best-effort */ }
+      }
     } catch {
       // ignore
     }
@@ -186,11 +199,14 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
-    state.active = true;
+    // active/activeCount may already be set by enqueueMessageCheck
+    if (!state.active) {
+      state.active = true;
+      this.activeCount++;
+    }
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
-    this.activeCount++;
 
     logger.debug(
       { groupJid, reason, activeCount: this.activeCount },

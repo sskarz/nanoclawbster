@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -105,6 +105,7 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(settingsFile, JSON.stringify({
@@ -173,6 +174,21 @@ function buildVolumeMounts(
       isMain,
     );
     mounts.push(...validatedMounts);
+  }
+
+  // When the host runs as root (UID 0), all directories above were created
+  // with root ownership.  The container runs as the `node` user (UID 1000)
+  // and needs write access to every non-readonly mount.  Chown them now.
+  if (process.getuid?.() === 0) {
+    for (const mount of mounts) {
+      if (!mount.readonly) {
+        try {
+          execSync(`chown -R 1000:1000 ${JSON.stringify(mount.hostPath)}`, { stdio: 'ignore' });
+        } catch {
+          // Best-effort
+        }
+      }
+    }
   }
 
   return mounts;
