@@ -287,7 +287,7 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
 server.tool(
   'restart_self',
-  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart.',
+  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. NOTE: The host automatically sends a "Back online!" notification on startup — do NOT send one yourself after the restart.',
   {},
   async () => {
     // Write a flag file so the next startup knows a restart just happened
@@ -311,7 +311,7 @@ server.tool(
 
 server.tool(
   'rebuild_self',
-  'Rebuild the NanoClaw agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user.',
+  'Rebuild the NanoClaw agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. NOTE: The host automatically sends a "Back online!" notification on startup — do NOT send one yourself after the rebuild.',
   {},
   async () => {
     // Write a restart flag so the back-online notification fires after the rebuild+restart
@@ -327,7 +327,7 @@ server.tool(
       groupFolder,
       timestamp: new Date().toISOString(),
     });
-    return { content: [{ type: 'text' as const, text: 'Rebuild command issued. This will take ~2-5 minutes — a "\u2705 Back online!" message will appear when done.' }] };
+    return { content: [{ type: 'text' as const, text: 'Rebuild command issued. This will take ~2-5 minutes. The host will automatically notify the user when back online.' }] };
   },
 );
 
