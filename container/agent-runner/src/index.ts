@@ -538,26 +538,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Check for restart flag — if present and recent, send a "back online" notification.
-  // The flag is written by the restart_self MCP tool before triggering the restart.
-  const restartFlagPath = '/workspace/group/restarting.flag';
-  try {
-    if (fs.existsSync(restartFlagPath)) {
-      const flagData = JSON.parse(fs.readFileSync(restartFlagPath, 'utf-8'));
-      const flagAge = Date.now() - new Date(flagData.timestamp).getTime();
-      const FIVE_MINUTES = 5 * 60 * 1000;
-      if (flagAge < FIVE_MINUTES) {
-        log('Restart flag detected — sending back-online notification');
-        writeIpcMessage(containerInput.chatJid, containerInput.groupFolder, '✅ Back online!');
-      } else {
-        log(`Restart flag is stale (${Math.round(flagAge / 1000)}s old), ignoring`);
-      }
-      fs.unlinkSync(restartFlagPath);
-    }
-  } catch (err) {
-    log(`Restart flag check failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };

@@ -428,6 +428,43 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * Check all registered groups for a restarting.flag file and send
+ * "Back online!" if the flag is recent. Runs once at startup so the
+ * notification fires without waiting for a user message.
+ */
+async function sendRestartNotifications(): Promise<void> {
+  const FIVE_MINUTES = 5 * 60 * 1000;
+
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    const flagPath = path.join(resolveGroupFolderPath(group.folder), 'restarting.flag');
+    try {
+      if (!fs.existsSync(flagPath)) continue;
+
+      const flagData = JSON.parse(fs.readFileSync(flagPath, 'utf-8'));
+      const flagAge = Date.now() - new Date(flagData.timestamp).getTime();
+
+      if (flagAge < FIVE_MINUTES) {
+        const channel = findChannel(channels, jid);
+        if (channel) {
+          logger.info({ group: group.name }, 'Restart flag detected — sending back-online notification');
+          await channel.sendMessage(jid, '✅ Back online!');
+        } else {
+          logger.warn({ jid }, 'Restart flag found but no channel for JID');
+        }
+      } else {
+        logger.info({ group: group.name, ageSeconds: Math.round(flagAge / 1000) }, 'Restart flag is stale, removing');
+      }
+
+      fs.unlinkSync(flagPath);
+    } catch (err) {
+      logger.warn({ group: group.name, err }, 'Restart flag check failed');
+      // Clean up flag even on error
+      try { fs.unlinkSync(flagPath); } catch { /* ignore */ }
+    }
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -494,6 +531,7 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  await sendRestartNotifications();
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
