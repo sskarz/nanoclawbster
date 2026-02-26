@@ -66,9 +66,9 @@ export const TRIGGER_PATTERN = new RegExp(
 );
 
 // Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
+// Hardcoded to PST/PDT — users are in Los Angeles regardless of server location.
 export const TIMEZONE =
-  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  process.env.TZ || 'America/Los_Angeles';
 
 // Discord configuration
 export const DISCORD_BOT_TOKEN =
