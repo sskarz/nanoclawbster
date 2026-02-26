@@ -67,6 +67,24 @@ export class DiscordChannel implements Channel {
         chatName = senderName;
       }
 
+      // Handle reply context — include who the user is replying to.
+      // This must run BEFORE mention detection so that the trigger
+      // prepended below still lands at the start of the final string.
+      if (message.reference?.messageId) {
+        try {
+          const repliedTo = await message.channel.messages.fetch(
+            message.reference.messageId,
+          );
+          const replyAuthor =
+            repliedTo.member?.displayName ||
+            repliedTo.author.displayName ||
+            repliedTo.author.username;
+          content = `[Reply to ${replyAuthor}] ${content}`;
+        } catch {
+          // Referenced message may have been deleted
+        }
+      }
+
       // Translate Discord @bot mentions into TRIGGER_PATTERN format.
       // Discord mentions look like <@botUserId> — these won't match
       // TRIGGER_PATTERN (e.g., ^@Andy\b), so we prepend the trigger
@@ -83,26 +101,12 @@ export class DiscordChannel implements Channel {
           content = content
             .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
             .trim();
-          // Prepend trigger if not already present
+          // Prepend trigger so TRIGGER_PATTERN matches at the start.
+          // At this point content may be "[Reply to X] message" so we
+          // always prepend rather than checking TRIGGER_PATTERN first.
           if (!TRIGGER_PATTERN.test(content)) {
             content = `@${ASSISTANT_NAME} ${content}`;
           }
-        }
-      }
-
-      // Handle reply context — include who the user is replying to
-      if (message.reference?.messageId) {
-        try {
-          const repliedTo = await message.channel.messages.fetch(
-            message.reference.messageId,
-          );
-          const replyAuthor =
-            repliedTo.member?.displayName ||
-            repliedTo.author.displayName ||
-            repliedTo.author.username;
-          content = `[Reply to ${replyAuthor}] ${content}`;
-        } catch {
-          // Referenced message may have been deleted
         }
       }
 
