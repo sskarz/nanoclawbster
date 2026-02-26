@@ -408,6 +408,33 @@ export async function processTaskIpc(
       break;
     }
 
+    case 'rebuild': {
+      logger.info({ sourceGroup }, 'Rebuild requested via IPC — rebuilding Docker image and restarting');
+      const { execSync: execSyncRebuild } = await import('child_process');
+      const containerDir = path.resolve(import.meta.dirname, '..', 'container');
+      try {
+        // Rebuild the agent Docker image from source
+        execSyncRebuild('docker build -t nanoclaw-agent:latest .', {
+          cwd: containerDir,
+          stdio: 'pipe',
+          timeout: 10 * 60 * 1000, // 10 minute timeout
+        });
+        logger.info('Docker image rebuild completed successfully');
+        // Prune dangling images to free disk space
+        try {
+          execSyncRebuild('docker image prune -f', { stdio: 'pipe', timeout: 30_000 });
+        } catch { /* non-fatal */ }
+      } catch (buildErr) {
+        logger.error({ err: buildErr }, 'Docker image rebuild failed — restarting with existing image');
+      }
+      // Recompile host TypeScript then exit (systemd will restart with new image)
+      try {
+        execSyncRebuild('npm run build', { cwd: path.resolve(import.meta.dirname, '..'), stdio: 'pipe', timeout: 30_000 });
+      } catch { /* non-fatal */ }
+      setTimeout(() => process.exit(0), 500);
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
