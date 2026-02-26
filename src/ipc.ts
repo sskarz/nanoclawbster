@@ -135,9 +135,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(tasksDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              // Delete task file before processing — restart/rebuild handlers
+              // call process.exit() and would never reach a post-process unlink.
+              fs.unlinkSync(filePath);
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
-              fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -404,7 +406,8 @@ export async function processTaskIpc(
       } catch (buildErr) {
         logger.error({ err: buildErr }, 'Build failed before restart — restarting with existing compiled code');
       }
-      setTimeout(() => process.exit(0), 500);
+      // Exit immediately so buffered agent output doesn't get processed and sent
+      process.exit(0);
       break;
     }
 
@@ -431,7 +434,8 @@ export async function processTaskIpc(
       try {
         execSyncRebuild('npm run build', { cwd: path.resolve(import.meta.dirname, '..'), stdio: 'pipe', timeout: 30_000 });
       } catch { /* non-fatal */ }
-      setTimeout(() => process.exit(0), 500);
+      // Exit immediately so buffered agent output doesn't get processed and sent
+      process.exit(0);
       break;
     }
 
