@@ -148,8 +148,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // Check trigger requirement:
+  // - Non-main groups require a trigger by default (unless requiresTrigger is explicitly false)
+  // - Main group also checks trigger if requiresTrigger is explicitly set to true
+  const needsTrigger = group.requiresTrigger === true ||
+    (!isMainGroup && group.requiresTrigger !== false);
+  if (needsTrigger) {
     const hasTrigger = missedMessages.some((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
@@ -352,9 +356,10 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const needsTrigger = group.requiresTrigger === true ||
+            (!isMainGroup && group.requiresTrigger !== false);
 
-          // For non-main groups, only act on trigger messages.
+          // Only act on trigger messages when required.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
