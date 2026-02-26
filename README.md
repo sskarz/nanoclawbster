@@ -6,7 +6,6 @@
 
 <p align="center">
   <a href="https://github.com/sskarz/nanoclawbster"><img src="https://img.shields.io/badge/GitHub-NanoClawbster-red?logo=github" alt="GitHub"></a>&nbsp;
-  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord"></a>
 </p>
 
 ---
