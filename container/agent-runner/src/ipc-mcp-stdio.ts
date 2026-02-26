@@ -309,6 +309,28 @@ server.tool(
   },
 );
 
+server.tool(
+  'rebuild_self',
+  'Rebuild the NanoClaw agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user.',
+  {},
+  async () => {
+    // Write a restart flag so the back-online notification fires after the rebuild+restart
+    const restartFlagPath = '/workspace/group/restarting.flag';
+    try {
+      fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
+    } catch (err) {
+      console.error(`[nanoclaw-mcp] Failed to write restart flag: ${err}`);
+    }
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'rebuild',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Rebuild command issued. This will take ~2-5 minutes — a "\u2705 Back online!" message will appear when done.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
