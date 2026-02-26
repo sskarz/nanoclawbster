@@ -285,6 +285,20 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'restart_self',
+  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect.',
+  {},
+  async () => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'restart',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Restart command sent. The service will restart in a moment.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

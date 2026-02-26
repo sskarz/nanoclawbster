@@ -393,6 +393,13 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'restart': {
+      logger.info({ sourceGroup }, 'Restart requested via IPC — exiting for service manager restart');
+      // process.exit(0) triggers systemd Restart=always to bring the service back up
+      setTimeout(() => process.exit(0), 500);
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
