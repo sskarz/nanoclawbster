@@ -287,7 +287,7 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
 server.tool(
   'restart_self',
-  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. NOTE: The host automatically sends a "Back online!" notification on startup — do NOT send one yourself after the restart.',
+  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},
   async () => {
     // Write a flag file so the next startup knows a restart just happened
@@ -311,7 +311,7 @@ server.tool(
 
 server.tool(
   'rebuild_self',
-  'Rebuild the NanoClaw agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. NOTE: The host automatically sends a "Back online!" notification on startup — do NOT send one yourself after the rebuild.',
+  'Rebuild the NanoClaw agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},
   async () => {
     // Write a restart flag so the back-online notification fires after the rebuild+restart
