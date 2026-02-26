@@ -1,5 +1,5 @@
 /**
- * NanoClaw Agent Runner
+ * NanoClawbster Agent Runner
  * Runs inside a container, receives config via stdin, outputs result to stdout
  *
  * Input protocol:
@@ -105,8 +105,8 @@ async function readStdin(): Promise<string> {
   });
 }
 
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---NANOCLAWBSTER_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---NANOCLAWBSTER_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
@@ -454,7 +454,7 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*',
+        'mcp__nanoclawbster__*',
         'mcp__composio__*',
       ],
       env: sdkEnv,
@@ -462,13 +462,13 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
-        nanoclaw: {
+        nanoclawbster: {
           command: 'node',
           args: [mcpServerPath],
           env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAWBSTER_CHAT_JID: containerInput.chatJid,
+            NANOCLAWBSTER_GROUP_FOLDER: containerInput.groupFolder,
+            NANOCLAWBSTER_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
         ...(sdkEnv.COMPOSIO_API_KEY ? {

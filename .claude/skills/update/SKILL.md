@@ -1,9 +1,9 @@
 ---
 name: update
-description: "Update NanoClaw from upstream. Fetches latest changes, merges with your customizations and skills, runs migrations. Triggers on \"update\", \"pull upstream\", \"sync with upstream\", \"get latest changes\"."
+description: "Update NanoClawbster from upstream. Fetches latest changes, merges with your customizations and skills, runs migrations. Triggers on \"update\", \"pull upstream\", \"sync with upstream\", \"get latest changes\"."
 ---
 
-# Update NanoClaw
+# Update NanoClawbster
 
 Pull upstream changes and merge them with the user's installation, preserving skills and customizations. Scripts live in `.claude/skills/update/scripts/`.
 
@@ -16,7 +16,7 @@ Pull upstream changes and merge them with the user's installation, preserving sk
 Check that the skills system is initialized:
 
 ```bash
-test -d .nanoclaw && echo "INITIALIZED" || echo "NOT_INITIALIZED"
+test -d .nanoclawbster && echo "INITIALIZED" || echo "NOT_INITIALIZED"
 ```
 
 **If NOT_INITIALIZED:** Run `initSkillsSystem()` first:
@@ -159,13 +159,13 @@ Report final status:
 
 ## Troubleshooting
 
-**No upstream remote:** The fetch script auto-adds `upstream` pointing to `https://github.com/qwibitai/nanoclaw.git`. If the user forked from a different URL, they should set the remote manually: `git remote add upstream <url>`.
+**No upstream remote:** The fetch script auto-adds `upstream` pointing to `https://github.com/qwibitai/nanoclawbster.git`. If the user forked from a different URL, they should set the remote manually: `git remote add upstream <url>`.
 
 **Merge conflicts in many files:** Consider whether the user has heavily customized core files. Suggest using the skills system for modifications instead of direct edits, as skills survive updates better.
 
 **Build fails after update:** Check if `package.json` dependencies changed. Run `npm install` to pick up new dependencies.
 
-**Rollback:** If something goes wrong after applying but before cleanup, the backup is still in `.nanoclaw/backup/`. Run:
+**Rollback:** If something goes wrong after applying but before cleanup, the backup is still in `.nanoclawbster/backup/`. Run:
 ```bash
 npx tsx -e "import { restoreBackup, clearBackup } from './skills-engine/backup.js'; restoreBackup(); clearBackup();"
 ```

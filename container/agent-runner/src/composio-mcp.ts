@@ -1,5 +1,5 @@
 /**
- * Composio MCP Server for NanoClaw
+ * Composio MCP Server for NanoClawbster
  * Stdio MCP server that exposes Composio's meta tools to the agent.
  *
  * On startup:

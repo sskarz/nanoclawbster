@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fetch upstream NanoClaw and extract to a temp directory.
+# Fetch upstream NanoClawbster and extract to a temp directory.
 # Outputs a structured status block for machine parsing.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,14 +14,14 @@ if git remote get-url upstream &>/dev/null; then
   REMOTE="upstream"
 elif git remote get-url origin &>/dev/null; then
   ORIGIN_URL=$(git remote get-url origin)
-  if echo "$ORIGIN_URL" | grep -q "qwibitai/nanoclaw"; then
+  if echo "$ORIGIN_URL" | grep -q "qwibitai/NanoClaw"; then
     REMOTE="origin"
   fi
 fi
 
 if [ -z "$REMOTE" ]; then
-  echo "No upstream remote found. Adding upstream → https://github.com/qwibitai/nanoclaw.git"
-  git remote add upstream https://github.com/qwibitai/nanoclaw.git
+  echo "No upstream remote found. Adding upstream → https://github.com/qwibitai/NanoClaw.git"
+  git remote add upstream https://github.com/qwibitai/NanoClaw.git
   REMOTE="upstream"
 fi
 
@@ -43,7 +43,7 @@ fi
 # Create temp dir and extract only the paths the skills engine tracks.
 # Read BASE_INCLUDES from the single source of truth in skills-engine/constants.ts,
 # plus always include migrations/ for the migration runner.
-TEMP_DIR=$(mktemp -d /tmp/nanoclaw-update-XXXX)
+TEMP_DIR=$(mktemp -d /tmp/nanoclawbster-update-XXXX)
 trap 'rm -rf "$TEMP_DIR"' ERR
 echo "Extracting $REMOTE/main to $TEMP_DIR..."
 

@@ -1,5 +1,5 @@
 /**
- * Stdio MCP Server for NanoClaw
+ * Stdio MCP Server for NanoClawbster
  * Standalone process that agent teams subagents can inherit.
  * Reads context from environment variables, writes IPC files for the host.
  */
@@ -17,9 +17,9 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const ATTACHMENTS_DIR = path.join(IPC_DIR, 'attachments');
 
 // Context from environment variables (set by the agent runner)
-const chatJid = process.env.NANOCLAW_CHAT_JID!;
-const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
-const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const chatJid = process.env.NANOCLAWBSTER_CHAT_JID!;
+const groupFolder = process.env.NANOCLAWBSTER_GROUP_FOLDER!;
+const isMain = process.env.NANOCLAWBSTER_IS_MAIN === '1';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -36,7 +36,7 @@ function writeIpcFile(dir: string, data: object): string {
 }
 
 const server = new McpServer({
-  name: 'nanoclaw',
+  name: 'nanoclawbster',
   version: '1.0.0',
 });
 
@@ -287,7 +287,7 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
 server.tool(
   'restart_self',
-  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+  'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},
   async () => {
     // Write a flag file so the next startup knows a restart just happened
@@ -297,7 +297,7 @@ server.tool(
       fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
     } catch (err) {
       // Non-fatal: startup notification just won't fire
-      console.error(`[nanoclaw-mcp] Failed to write restart flag: ${err}`);
+      console.error(`[nanoclawbster-mcp] Failed to write restart flag: ${err}`);
     }
 
     writeIpcFile(TASKS_DIR, {
@@ -311,7 +311,7 @@ server.tool(
 
 server.tool(
   'rebuild_self',
-  'Rebuild the NanoClaw agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+  'Rebuild the NanoClawbster agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},
   async () => {
     // Write a restart flag so the back-online notification fires after the rebuild+restart
@@ -319,7 +319,7 @@ server.tool(
     try {
       fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
     } catch (err) {
-      console.error(`[nanoclaw-mcp] Failed to write restart flag: ${err}`);
+      console.error(`[nanoclawbster-mcp] Failed to write restart flag: ${err}`);
     }
 
     writeIpcFile(TASKS_DIR, {

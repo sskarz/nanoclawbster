@@ -417,7 +417,7 @@ export async function processTaskIpc(
       const containerDir = path.resolve(import.meta.dirname, '..', 'container');
       try {
         // Rebuild the agent Docker image from source
-        execSyncRebuild('docker build -t nanoclaw-agent:latest .', {
+        execSyncRebuild('docker build -t nanoclawbster-agent:latest .', {
           cwd: containerDir,
           stdio: 'pipe',
           timeout: 10 * 60 * 1000, // 10 minute timeout

@@ -12,7 +12,7 @@
 
 ## What is NanoClawbster?
 
-NanoClawbster is a fork of [NanoClaw](https://github.com/qwibitai/NanoClaw) that adds Discord as a first-class channel, integrates [Composio](https://composio.dev) for 1000+ app connections, and is led by a lobster. Because every AI assistant deserves a crustacean mascot.
+NanoClawbster is inspired by [NanoClaw](https://github.com/qwibitai/NanoClaw) and adds Discord as a first-class channel, integrates [Composio](https://composio.dev) for 1000+ app connections, and is led by a lobster. Because every AI assistant deserves a crustacean mascot.
 
 Like NanoClaw, it's a single Node.js process that routes messages to Claude agents running in isolated Linux containers. Small enough to read, secure enough to trust, weird enough to have a lobster logo.
 
@@ -120,7 +120,7 @@ Or run `/customize` for guided changes. The codebase is small enough that Claude
 
 ## Credits
 
-NanoClawbster is built on top of [NanoClaw](https://github.com/qwibitai/NanoClaw) by [qwibitai](https://github.com/qwibitai). All the core architecture -- container isolation, agent SDK integration, the message loop -- comes from there. This fork adds the Discord channel, Composio MCP, and a lobster.
+NanoClawbster is inspired by [NanoClaw](https://github.com/qwibitai/NanoClaw) by [qwibitai](https://github.com/qwibitai). The core architecture -- container isolation, agent SDK integration, the message loop -- draws from that project. NanoClawbster adds the Discord channel, Composio MCP, and a lobster.
 
 ## License
 
