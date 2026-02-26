@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const ATTACHMENTS_DIR = path.join(IPC_DIR, 'attachments');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -45,15 +46,19 @@ server.tool(
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    files: z.array(z.string()).optional().describe('Filenames of files to attach (e.g. ["report.pdf"]). Files must be saved to /workspace/ipc/attachments/ first.'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+
+    const data: Record<string, string | string[] | undefined> = {
       type: 'message',
       chatJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
+      files: args.files?.length ? args.files : undefined,
     };
 
     writeIpcFile(MESSAGES_DIR, data);

@@ -16,7 +16,7 @@ import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, files?: string[]) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -79,11 +79,23 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  // Resolve file attachment paths (security: no path traversal)
+                  const attachmentsDir = path.join(ipcBaseDir, sourceGroup, 'attachments');
+                  const resolvedFiles = (Array.isArray(data.files) ? data.files : [])
+                    .filter((f: unknown) => typeof f === 'string' && path.basename(f as string) === f)
+                    .map((f: string) => path.join(attachmentsDir, f))
+                    .filter((p: string) => fs.existsSync(p));
+
+                  await deps.sendMessage(data.chatJid, data.text, resolvedFiles.length ? resolvedFiles : undefined);
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: data.chatJid, sourceGroup, attachments: resolvedFiles.length },
                     'IPC message sent',
                   );
+
+                  // Clean up attachment files after send
+                  for (const p of resolvedFiles) {
+                    try { fs.unlinkSync(p); } catch { /* best-effort */ }
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },

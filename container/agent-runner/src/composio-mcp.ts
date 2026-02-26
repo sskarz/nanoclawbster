@@ -1,11 +1,13 @@
 /**
  * Composio MCP Server for NanoClaw
- * Stdio MCP server that exposes Composio's connected-app tools to the agent.
+ * Stdio MCP server that exposes Composio's meta tools to the agent.
  *
  * On startup:
- * 1. Fetches connected accounts for userId "default" to discover toolkit slugs
- * 2. Loads all tools for those toolkits from Composio's API
- * 3. Exposes them as MCP tools; calls are proxied back to Composio for execution
+ * 1. Loads the 5 COMPOSIO meta tools (search, execute, manage connections, etc.)
+ * 2. Exposes them as MCP tools; calls are proxied back to Composio for execution
+ *
+ * The agent uses COMPOSIO_SEARCH_TOOLS to discover any of 1000+ app tools at
+ * runtime, then COMPOSIO_MULTI_EXECUTE_TOOL to run them — no pre-registration needed.
  *
  * Requires: COMPOSIO_API_KEY env var
  */
@@ -28,32 +30,15 @@ const USER_ID = 'default';
 
 const composio = new Composio({ apiKey });
 
-// Step 1: Discover connected toolkits via active connected accounts
-let toolkitSlugs: string[] = [];
-try {
-  const accounts = await composio.connectedAccounts.list({
-    userIds: [USER_ID],
-    statuses: ['ACTIVE'],
-  });
-  toolkitSlugs = [...new Set(accounts.items.map((a) => a.toolkit.slug))];
-  process.stderr.write(`[composio-mcp] Connected toolkits: ${toolkitSlugs.join(', ') || 'none'}\n`);
-} catch (err) {
-  process.stderr.write(`[composio-mcp] Failed to list connected accounts: ${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
-}
-
-// Step 2: Load raw tools for all connected toolkits
+// Load the COMPOSIO meta-toolkit tools (search, execute, manage connections, etc.)
 let rawTools: Tool[] = [];
-if (toolkitSlugs.length > 0) {
-  try {
-    rawTools = await composio.tools.getRawComposioTools({ toolkits: toolkitSlugs });
-    process.stderr.write(`[composio-mcp] Loaded ${rawTools.length} tools\n`);
-  } catch (err) {
-    process.stderr.write(`[composio-mcp] Failed to load tools: ${err instanceof Error ? err.message : String(err)}\n`);
-    process.exit(1);
-  }
-} else {
-  process.stderr.write(`[composio-mcp] No active connected accounts — starting with no tools\n`);
+try {
+  rawTools = await composio.tools.getRawComposioTools({ toolkits: ['COMPOSIO'] });
+  const names = rawTools.map((t) => t.slug).join(', ');
+  process.stderr.write(`[composio-mcp] Loaded ${rawTools.length} meta tools: ${names}\n`);
+} catch (err) {
+  process.stderr.write(`[composio-mcp] Failed to load meta tools: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(1);
 }
 
 // Map to MCP tool format

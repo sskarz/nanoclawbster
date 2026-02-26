@@ -1,6 +1,11 @@
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
 import { Client, Events, GatewayIntentBits, Message, Partials, TextChannel } from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { resolveGroupIpcPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -85,27 +90,6 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Handle attachments — store placeholders so the agent knows something was sent
-      if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map((att) => {
-          const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
-          } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
-          } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
-          } else {
-            return `[File: ${att.name || 'file'}]`;
-          }
-        });
-        if (content) {
-          content = `${content}\n${attachmentDescriptions.join('\n')}`;
-        } else {
-          content = attachmentDescriptions.join('\n');
-        }
-      }
-
       // Handle reply context — include who the user is replying to
       if (message.reference?.messageId) {
         try {
@@ -133,6 +117,44 @@ export class DiscordChannel implements Channel {
           'Message from unregistered Discord channel',
         );
         return;
+      }
+
+      // Download attachments for the agent to read
+      if (message.attachments.size > 0) {
+        const receivedDir = path.join(resolveGroupIpcPath(group.folder), 'received');
+        fs.mkdirSync(receivedDir, { recursive: true });
+        const MAX_SIZE = 25 * 1024 * 1024;
+        const lines: string[] = [];
+        for (const att of message.attachments.values()) {
+          const contentType = att.contentType || '';
+          if (contentType.startsWith('video/')) {
+            lines.push(`[Video: ${att.name || 'video'} (not downloaded)]`);
+            continue;
+          }
+          if (att.size > MAX_SIZE) {
+            lines.push(`[File too large: ${att.name} (${(att.size / 1024 / 1024).toFixed(1)} MB)]`);
+            continue;
+          }
+          const safeName = `${msgId}-${(att.name || 'attachment').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+          const hostPath = path.join(receivedDir, safeName);
+          const containerPath = `/workspace/ipc/received/${safeName}`;
+          try {
+            const resp = await fetch(att.url);
+            fs.writeFileSync(hostPath, Buffer.from(await resp.arrayBuffer()));
+            if (process.getuid?.() === 0) {
+              try { execSync(`chown 1000:1000 ${JSON.stringify(hostPath)}`, { stdio: 'ignore' }); } catch {}
+            }
+            lines.push(contentType.startsWith('image/')
+              ? `[Image: ${att.name} → ${containerPath}]`
+              : `[File: ${att.name} → ${containerPath}]`);
+          } catch (err) {
+            logger.warn({ name: att.name, err }, 'Failed to download Discord attachment');
+            lines.push(`[Attachment download failed: ${att.name}]`);
+          }
+        }
+        if (lines.length > 0) {
+          content = content ? `${content}\n${lines.join('\n')}` : lines.join('\n');
+        }
       }
 
       // Deliver message — startMessageLoop() will pick it up
@@ -174,7 +196,7 @@ export class DiscordChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, files?: string[]): Promise<void> {
     if (!this.client) {
       logger.warn('Discord client not initialized');
       return;
@@ -198,10 +220,14 @@ export class DiscordChannel implements Channel {
 
       const MAX_LENGTH = 2000;
 
-      if (imageUrls.length > 0) {
-        // Send first chunk with images attached
+      // Merge file-path attachments with extracted image URLs
+      // discord.js accepts both absolute file paths and URLs in the files array
+      const allFiles = [...(files ?? []), ...imageUrls];
+
+      if (allFiles.length > 0) {
+        // Send first chunk with all attachments
         const firstChunk = cleanText.slice(0, MAX_LENGTH) || undefined;
-        await textChannel.send({ content: firstChunk, files: imageUrls });
+        await textChannel.send({ content: firstChunk, files: allFiles });
         // Send any remaining text as plain follow-up messages
         for (let i = MAX_LENGTH; i < cleanText.length; i += MAX_LENGTH) {
           await textChannel.send(cleanText.slice(i, i + MAX_LENGTH));
@@ -216,7 +242,7 @@ export class DiscordChannel implements Channel {
           }
         }
       }
-      logger.info({ jid, length: text.length, images: imageUrls.length }, 'Discord message sent');
+      logger.info({ jid, length: text.length, images: imageUrls.length, attachments: files?.length ?? 0 }, 'Discord message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
     }
