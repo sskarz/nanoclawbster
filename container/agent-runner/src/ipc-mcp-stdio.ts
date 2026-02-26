@@ -42,7 +42,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user \u2014 use this tool if you need to communicate with the user or group.",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -119,7 +119,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     } else if (args.schedule_type === 'once') {
       if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" \u2014 use format like "2026-02-01T15:30:00".` }],
           isError: true,
         };
       }
@@ -290,19 +290,22 @@ server.tool(
   'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart.',
   {},
   async () => {
-    writeIpcFile(MESSAGES_DIR, {
-      type: 'message',
-      chatJid,
-      text: 'Restarting now — be right back.',
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    });
+    // Write a flag file so the next startup knows a restart just happened
+    // and can send a "back online" notification automatically.
+    const restartFlagPath = '/workspace/group/restarting.flag';
+    try {
+      fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
+    } catch (err) {
+      // Non-fatal: startup notification just won't fire
+      console.error(`[nanoclaw-mcp] Failed to write restart flag: ${err}`);
+    }
+
     writeIpcFile(TASKS_DIR, {
       type: 'restart',
       groupFolder,
       timestamp: new Date().toISOString(),
     });
-    return { content: [{ type: 'text' as const, text: 'Restart message sent and restart command issued. The service will restart in a moment.' }] };
+    return { content: [{ type: 'text' as const, text: 'Restart command issued. The service will restart in a moment.' }] };
   },
 );
 
