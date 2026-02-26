@@ -55,6 +55,21 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
+## Trigger Gating (`requiresTrigger`)
+
+Each registered group has a `requires_trigger` flag in the DB (`registered_groups.requires_trigger`):
+
+- `1` (true) — agent only runs when a message matches `TRIGGER_PATTERN` (e.g. `@Nano`). No container spawned, no typing indicator for other messages.
+- `0` (false) — agent runs on every message (e.g. a private self-chat).
+- `null` — defaults to `true` for non-main groups, `false` for the main group.
+
+**Important:** `requiresTrigger: true` is respected even for the main group folder. This matters when the main group is a public channel (e.g. Discord `#general`) where the bot should only respond to @mentions, not every message.
+
+To update via Node:
+```js
+db.prepare("UPDATE registered_groups SET requires_trigger = 1 WHERE jid LIKE 'dc:%'").run();
+```
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.

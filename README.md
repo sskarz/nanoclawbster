@@ -155,6 +155,10 @@ Agents run in containers, not behind application-level permission checks. They c
 
 We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
 
+**Will the bot respond to every message in a Discord server?**
+
+No. Discord channels are registered with trigger-gating enabled by default, so the bot only wakes up when someone @mentions it. Messages without a mention are stored silently as context (so the bot has history when it does respond) but no container is spawned and no typing indicator appears.
+
 **How do I debug issues?**
 
 Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
