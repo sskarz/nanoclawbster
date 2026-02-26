@@ -68,8 +68,9 @@ export class DiscordChannel implements Channel {
       }
 
       // Handle reply context — include who the user is replying to.
-      // This must run BEFORE mention detection so that the trigger
+      // This must run BEFORE mention/reply detection so that the trigger
       // prepended below still lands at the start of the final string.
+      let isReplyToBot = false;
       if (message.reference?.messageId) {
         try {
           const repliedTo = await message.channel.messages.fetch(
@@ -80,15 +81,19 @@ export class DiscordChannel implements Channel {
             repliedTo.author.displayName ||
             repliedTo.author.username;
           content = `[Reply to ${replyAuthor}] ${content}`;
+          // Check if the user is replying to one of the bot's messages
+          if (this.client?.user && repliedTo.author.id === this.client.user.id) {
+            isReplyToBot = true;
+          }
         } catch {
           // Referenced message may have been deleted
         }
       }
 
-      // Translate Discord @bot mentions into TRIGGER_PATTERN format.
+      // Translate Discord @bot mentions and direct replies into TRIGGER_PATTERN format.
       // Discord mentions look like <@botUserId> — these won't match
       // TRIGGER_PATTERN (e.g., ^@Andy\b), so we prepend the trigger
-      // when the bot is @mentioned.
+      // when the bot is @mentioned or directly replied to.
       if (this.client?.user) {
         const botId = this.client.user.id;
         const isBotMentioned =
@@ -96,7 +101,7 @@ export class DiscordChannel implements Channel {
           content.includes(`<@${botId}>`) ||
           content.includes(`<@!${botId}>`);
 
-        if (isBotMentioned) {
+        if (isBotMentioned || isReplyToBot) {
           // Strip the <@botId> mention to avoid visual clutter
           content = content
             .replace(new RegExp(`<@!?${botId}>`, 'g'), '')

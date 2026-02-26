@@ -287,15 +287,22 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
 server.tool(
   'restart_self',
-  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect.',
+  'Restart the NanoClaw service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart.',
   {},
   async () => {
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'message',
+      chatJid,
+      text: 'Restarting now — be right back.',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
     writeIpcFile(TASKS_DIR, {
       type: 'restart',
       groupFolder,
       timestamp: new Date().toISOString(),
     });
-    return { content: [{ type: 'text' as const, text: 'Restart command sent. The service will restart in a moment.' }] };
+    return { content: [{ type: 'text' as const, text: 'Restart message sent and restart command issued. The service will restart in a moment.' }] };
   },
 );
 

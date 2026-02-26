@@ -394,8 +394,16 @@ export async function processTaskIpc(
       break;
 
     case 'restart': {
-      logger.info({ sourceGroup }, 'Restart requested via IPC — exiting for service manager restart');
-      // process.exit(0) triggers systemd Restart=always to bring the service back up
+      logger.info({ sourceGroup }, 'Restart requested via IPC — rebuilding and exiting for service manager restart');
+      // Recompile TypeScript so the restarted process picks up any source changes
+      // (e.g. from a merged PR), then exit for systemd Restart=always.
+      const { execSync } = await import('child_process');
+      try {
+        execSync('npm run build', { cwd: path.resolve(import.meta.dirname, '..'), stdio: 'pipe', timeout: 30_000 });
+        logger.info('Build completed successfully before restart');
+      } catch (buildErr) {
+        logger.error({ err: buildErr }, 'Build failed before restart — restarting with existing compiled code');
+      }
       setTimeout(() => process.exit(0), 500);
       break;
     }
