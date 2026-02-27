@@ -76,6 +76,27 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Dev workspace: writable git clone for self-improvement workflow.
+    // Only main group gets this — agents edit, test, then push via Composio.
+    const devWorkspaceDir = path.join(DATA_DIR, 'dev-workspace');
+    if (!fs.existsSync(devWorkspaceDir)) {
+      try {
+        execSync(`git clone "${process.cwd()}" "${devWorkspaceDir}"`, {
+          stdio: 'pipe', timeout: 60_000,
+        });
+        logger.info('Dev workspace initialized from local clone');
+      } catch (err) {
+        logger.error({ err }, 'Failed to initialize dev workspace');
+      }
+    }
+    if (fs.existsSync(devWorkspaceDir)) {
+      mounts.push({
+        hostPath: devWorkspaceDir,
+        containerPath: '/workspace/dev',
+        readonly: false,
+      });
+    }
   } else {
     // Other groups only get their own folder
     mounts.push({

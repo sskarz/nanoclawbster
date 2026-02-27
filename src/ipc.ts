@@ -177,6 +177,8 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For pull_and_deploy
+    branch?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -435,6 +437,155 @@ export async function processTaskIpc(
         execSyncRebuild('npm run build', { cwd: path.resolve(import.meta.dirname, '..'), stdio: 'pipe', timeout: 30_000 });
       } catch { /* non-fatal */ }
       // Exit immediately so buffered agent output doesn't get processed and sent
+      process.exit(0);
+      break;
+    }
+
+    case 'test_container_build': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized test_container_build attempt');
+        break;
+      }
+
+      logger.info({ sourceGroup }, 'Test container build requested from dev workspace');
+      const { execSync: execSyncTestBuild } = await import('child_process');
+      const devContainerDir = path.join(DATA_DIR, 'dev-workspace', 'container');
+      const resultPath = path.join(DATA_DIR, 'dev-workspace', '.build-result.json');
+      const startTime = Date.now();
+
+      try {
+        execSyncTestBuild('docker build -t nanoclawbster-agent:test .', {
+          cwd: devContainerDir,
+          stdio: 'pipe',
+          timeout: 10 * 60 * 1000,
+        });
+
+        // Clean up test image
+        try { execSyncTestBuild('docker rmi nanoclawbster-agent:test', { stdio: 'pipe' }); } catch { /* ok */ }
+
+        const result = { success: true, duration_ms: Date.now() - startTime, timestamp: new Date().toISOString() };
+        fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
+        logger.info({ duration_ms: result.duration_ms }, 'Test container build succeeded');
+      } catch (err) {
+        const stderr = err instanceof Error && 'stderr' in err ? (err as any).stderr?.toString().slice(-2000) : String(err);
+        const result = { success: false, error: stderr, duration_ms: Date.now() - startTime, timestamp: new Date().toISOString() };
+        fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
+        logger.error({ err }, 'Test container build failed');
+      }
+      // NOTE: No process.exit() — the host keeps running. This is a non-destructive test.
+      break;
+    }
+
+    case 'pull_and_deploy': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized pull_and_deploy attempt');
+        break;
+      }
+
+      const rawBranch = data.branch || 'main';
+      // Sanitize branch name to prevent command injection (allow only safe git ref chars)
+      const branch = rawBranch.replace(/[^a-zA-Z0-9._\-/]/g, '');
+      if (!branch) {
+        logger.error({ rawBranch }, 'Invalid branch name — aborting deploy');
+        break;
+      }
+      logger.info({ sourceGroup, branch }, 'Pull and deploy requested via IPC');
+      const { execSync: execSyncDeploy } = await import('child_process');
+      const projectRoot = path.resolve(import.meta.dirname, '..');
+
+      // 1. Save current HEAD for rollback
+      let previousHead: string;
+      try {
+        previousHead = execSyncDeploy('git rev-parse HEAD', { cwd: projectRoot, encoding: 'utf-8' }).trim();
+        if (!/^[0-9a-f]{40}$/.test(previousHead)) {
+          throw new Error(`Unexpected HEAD format: ${previousHead}`);
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to get current HEAD — aborting deploy');
+        break;
+      }
+
+      // 2. Fetch and reset to remote branch
+      try {
+        execSyncDeploy(`git fetch origin ${branch}`, { cwd: projectRoot, stdio: 'pipe', timeout: 60_000 });
+        execSyncDeploy(`git reset --hard origin/${branch}`, { cwd: projectRoot, stdio: 'pipe', timeout: 30_000 });
+        logger.info({ branch }, 'Git pull completed');
+      } catch (err) {
+        logger.error({ err }, 'Git fetch/reset failed — aborting deploy');
+        break;
+      }
+
+      // 3. Check if package.json changed
+      try {
+        const diff = execSyncDeploy(`git diff ${previousHead} HEAD --name-only`, { cwd: projectRoot, encoding: 'utf-8' });
+        if (diff.includes('package.json') || diff.includes('package-lock.json')) {
+          logger.info('package.json changed — running npm install');
+          execSyncDeploy('npm install', { cwd: projectRoot, stdio: 'pipe', timeout: 120_000 });
+        }
+      } catch (err) {
+        logger.warn({ err }, 'npm install check/run failed — continuing with build');
+      }
+
+      // 4. Build TypeScript
+      let buildFailed = false;
+      try {
+        execSyncDeploy('npm run build', { cwd: projectRoot, stdio: 'pipe', timeout: 60_000 });
+        logger.info('TypeScript build succeeded');
+      } catch (buildErr) {
+        buildFailed = true;
+        logger.error({ err: buildErr }, 'TypeScript build failed — rolling back');
+
+        // Rollback: restore previous commit
+        try {
+          execSyncDeploy(`git reset --hard ${previousHead}`, { cwd: projectRoot, stdio: 'pipe', timeout: 30_000 });
+          // Restore old dependencies if needed
+          try {
+            execSyncDeploy('npm install', { cwd: projectRoot, stdio: 'pipe', timeout: 120_000 });
+          } catch { /* best-effort */ }
+          // Rebuild with old code
+          execSyncDeploy('npm run build', { cwd: projectRoot, stdio: 'pipe', timeout: 60_000 });
+          logger.info({ previousHead }, 'Rollback completed successfully');
+        } catch (rollbackErr) {
+          logger.error({ err: rollbackErr }, 'Rollback build also failed — restarting with whatever is compiled');
+        }
+      }
+
+      // 5. Rebuild Docker image if container/ files changed (only if build succeeded)
+      if (!buildFailed) {
+        try {
+          const diff = execSyncDeploy(`git diff ${previousHead} HEAD --name-only`, { cwd: projectRoot, encoding: 'utf-8' });
+          if (diff.split('\n').some(f => f.startsWith('container/'))) {
+            logger.info('container/ files changed — rebuilding Docker image');
+            const deployContainerDir = path.join(projectRoot, 'container');
+            execSyncDeploy('docker build -t nanoclawbster-agent:latest .', {
+              cwd: deployContainerDir,
+              stdio: 'pipe',
+              timeout: 10 * 60 * 1000,
+            });
+            logger.info('Docker image rebuild completed');
+            try {
+              execSyncDeploy('docker image prune -f', { stdio: 'pipe', timeout: 30_000 });
+            } catch { /* non-fatal */ }
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Docker rebuild check/run failed — continuing with restart');
+        }
+      }
+
+      // 6. Sync dev workspace to match the deployed branch
+      const devWorkspaceDir = path.join(DATA_DIR, 'dev-workspace');
+      if (fs.existsSync(devWorkspaceDir)) {
+        try {
+          execSyncDeploy(`git fetch origin ${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 60_000 });
+          execSyncDeploy(`git reset --hard origin/${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 30_000 });
+          logger.info('Dev workspace synced to deployed branch');
+        } catch (err) {
+          logger.warn({ err }, 'Dev workspace sync failed — non-fatal');
+        }
+      }
+
+      // 7. Exit for systemd restart
+      logger.info({ buildFailed }, 'Pull and deploy complete — restarting');
       process.exit(0);
       break;
     }

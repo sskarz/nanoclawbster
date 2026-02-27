@@ -331,6 +331,92 @@ server.tool(
   },
 );
 
+server.tool(
+  'pull_and_deploy',
+  `Pull merged changes from GitHub into the live codebase and deploy.
+
+Use this AFTER a PR has been merged on GitHub. The host will:
+1. Pull latest from the main branch (via git)
+2. Run npm install if package.json changed
+3. Build TypeScript
+4. Rebuild Docker image if container/ files changed
+5. Restart the service
+
+If the build fails, it automatically rolls back to the previous version.
+
+IMPORTANT: Always use send_message BEFORE calling this to warn the user about the restart. After calling, wrap remaining output in <internal> tags.`,
+  {
+    branch: z.string().default('main').describe('Branch to pull (usually "main")'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can pull and deploy.' }],
+        isError: true,
+      };
+    }
+
+    const restartFlagPath = '/workspace/group/restarting.flag';
+    try {
+      fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
+    } catch (err) {
+      console.error(`[nanoclawbster-mcp] Failed to write restart flag: ${err}`);
+    }
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'pull_and_deploy',
+      branch: args.branch,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: 'Pull and deploy command issued. The host will pull, build, and restart. Auto-rollback on build failure.',
+      }],
+    };
+  },
+);
+
+server.tool(
+  'test_container_build',
+  `Test-build the Docker container image from the dev workspace without deploying.
+
+Use this to verify Dockerfile or agent-runner changes compile and build correctly
+before creating a PR. The host builds from /workspace/dev/container/ and writes
+the result to /workspace/dev/.build-result.json.
+
+After calling this tool, poll the result file:
+  cat /workspace/dev/.build-result.json
+It may take 2-5 minutes. The file contains {success, error?, duration_ms, timestamp}.`,
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can test container builds.' }],
+        isError: true,
+      };
+    }
+
+    // Clear any previous result
+    try { fs.unlinkSync('/workspace/dev/.build-result.json'); } catch { /* ok */ }
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'test_container_build',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: 'Test build initiated. Poll /workspace/dev/.build-result.json for the result (2-5 min). The build uses the dev workspace, NOT the live code.',
+      }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
