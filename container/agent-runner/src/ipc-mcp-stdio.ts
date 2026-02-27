@@ -248,9 +248,13 @@ server.tool(
   },
 );
 
+// Main-only tools: only registered when running as the main group so non-main
+// agents never see them in the tool list (prevents hallucinated privilege).
+if (isMain) {
+
 server.tool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+  `Register a new WhatsApp group so the agent can respond to messages there.
 
 Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
   {
@@ -260,13 +264,6 @@ Use available_groups.json to find the JID for a group. The folder name should be
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
   async (args) => {
-    if (!isMain) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only the main group can register new groups.' }],
-        isError: true,
-      };
-    }
-
     const data = {
       type: 'register_group',
       jid: args.jid,
@@ -375,13 +372,6 @@ IMPORTANT: Always use send_message BEFORE calling this to warn the user about th
     branch: z.string().default('main').describe('Branch to pull (usually "main")'),
   },
   async (args) => {
-    if (!isMain) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only the main group can pull and deploy.' }],
-        isError: true,
-      };
-    }
-
     const restartFlagPath = '/workspace/group/restarting.flag';
     try {
       fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
@@ -418,13 +408,6 @@ After calling this tool, poll the result file:
 It may take 2-5 minutes. The file contains {success, error?, duration_ms, timestamp}.`,
   {},
   async () => {
-    if (!isMain) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only the main group can test container builds.' }],
-        isError: true,
-      };
-    }
-
     // Clear any previous result
     try { fs.unlinkSync('/workspace/dev/.build-result.json'); } catch { /* ok */ }
 
@@ -442,6 +425,8 @@ It may take 2-5 minutes. The file contains {success, error?, duration_ms, timest
     };
   },
 );
+
+} // end main-only tools
 
 // Start the stdio transport
 const transport = new StdioServerTransport();
