@@ -13,6 +13,7 @@ import {
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
+import { formatOutbound } from './router.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -89,7 +90,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     .map((f: string) => path.join(attachmentsDir, f))
                     .filter((p: string) => fs.existsSync(p));
 
-                  await deps.sendMessage(data.chatJid, data.text, resolvedFiles.length ? resolvedFiles : undefined);
+                  const text = formatOutbound(data.text);
+                  if (!text && (!resolvedFiles.length)) break; // nothing left after stripping <internal> tags
+                  await deps.sendMessage(data.chatJid, text, resolvedFiles.length ? resolvedFiles : undefined);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup, attachments: resolvedFiles.length },
                     'IPC message sent',
