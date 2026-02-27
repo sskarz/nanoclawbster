@@ -600,57 +600,6 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
-/**
- * Get new messages from unregistered Discord channels (dc:* JIDs not in the
- * registeredJids set) that contain a trigger (@mention).
- * Used by the Discord catch-all path in the message loop.
- */
-export function getNewDiscordCatchAllMessages(
-  registeredJids: string[],
-  lastTimestamp: string,
-  botPrefix: string,
-): { messages: NewMessage[]; newTimestamp: string } {
-  const sql =
-    registeredJids.length > 0
-      ? `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
-    FROM messages
-    WHERE timestamp > ?
-      AND chat_jid LIKE 'dc:%'
-      AND chat_jid NOT IN (${registeredJids.map(() => '?').join(',')})
-      AND is_bot_message = 0
-      AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-      AND content LIKE '@%'
-    ORDER BY timestamp
-  `
-      : `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
-    FROM messages
-    WHERE timestamp > ?
-      AND chat_jid LIKE 'dc:%'
-      AND is_bot_message = 0
-      AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-      AND content LIKE '@%'
-    ORDER BY timestamp
-  `;
-
-  const params: unknown[] =
-    registeredJids.length > 0
-      ? [lastTimestamp, ...registeredJids, `${botPrefix}:%`]
-      : [lastTimestamp, `${botPrefix}:%`];
-
-  const rows = db.prepare(sql).all(...params) as NewMessage[];
-
-  let newTimestamp = lastTimestamp;
-  for (const row of rows) {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
-  }
-
-  return { messages: rows, newTimestamp };
-}
-
 // --- Stats ---
 
 export interface SystemStats {

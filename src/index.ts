@@ -4,7 +4,6 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   DISCORD_BOT_TOKEN,
-  DISCORD_CATCH_ALL_FOLDER,
   DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -27,7 +26,6 @@ import {
   getAllSessions,
   getAllTasks,
   getMessagesSince,
-  getNewDiscordCatchAllMessages,
   getNewMessages,
   getRouterState,
   getStats,
@@ -58,32 +56,6 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-
-// Synthetic group registration for the Discord catch-all path.
-// Unregistered Discord channels are routed through this shared session.
-// It is NOT stored in the registered_groups DB table.
-let discordCatchAllGroup: RegisteredGroup | null = null;
-
-function ensureDiscordCatchAllGroup(): RegisteredGroup | null {
-  if (discordCatchAllGroup) return discordCatchAllGroup;
-  const folder = DISCORD_CATCH_ALL_FOLDER;
-  try {
-    const groupDir = resolveGroupFolderPath(folder);
-    fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-  } catch (err) {
-    logger.error({ folder, err }, 'Failed to create Discord catch-all group folder');
-    return null;
-  }
-  discordCatchAllGroup = {
-    name: 'Discord (catch-all)',
-    folder,
-    trigger: `@${ASSISTANT_NAME}`,
-    added_at: new Date().toISOString(),
-    requiresTrigger: true,
-  };
-  logger.info({ folder }, 'Discord catch-all group initialized');
-  return discordCatchAllGroup;
-}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -158,99 +130,12 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 /**
- * Process pending messages from an unregistered Discord channel.
- * Routes to the shared "discord" catch-all group but responds in the
- * originating channel (chatJid preserved independently of groupFolder).
- */
-async function processDiscordCatchAllMessages(chatJid: string): Promise<boolean> {
-  const group = ensureDiscordCatchAllGroup();
-  if (!group) return true;
-
-  const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    logger.warn({ chatJid }, 'No channel found for Discord catch-all JID');
-    return true;
-  }
-
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-
-  if (missedMessages.length === 0) return true;
-
-  // Always require trigger for unregistered channels
-  const hasTrigger = missedMessages.some((m) =>
-    TRIGGER_PATTERN.test(m.content.trim()),
-  );
-  if (!hasTrigger) return true;
-
-  const prompt = formatMessages(missedMessages);
-
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
-
-  logger.info(
-    { chatJid, messageCount: missedMessages.length },
-    'Processing Discord catch-all messages',
-  );
-
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  const resetIdleTimer = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      logger.debug({ chatJid }, 'Idle timeout, closing catch-all container stdin');
-      queue.closeStdin(chatJid);
-    }, IDLE_TIMEOUT);
-  };
-
-  await channel.setTyping?.(chatJid, true);
-  let hadError = false;
-  let outputSentToUser = false;
-
-  await runAgent(group, prompt, chatJid, async (result) => {
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ chatJid }, `Catch-all agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
-      }
-      resetIdleTimer();
-    }
-    if (result.status === 'success') queue.notifyIdle(chatJid);
-    if (result.status === 'error') hadError = true;
-  });
-
-  await channel.setTyping?.(chatJid, false);
-  if (idleTimer) clearTimeout(idleTimer);
-
-  if (hadError) {
-    if (outputSentToUser) {
-      logger.warn({ chatJid }, 'Catch-all agent error after output, skipping cursor rollback');
-      return true;
-    }
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
-    logger.warn({ chatJid }, 'Catch-all agent error, rolled back message cursor for retry');
-    return false;
-  }
-
-  return true;
-}
-
-/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
-  if (!group) {
-    // Fallback: Discord catch-all routing for unregistered dc: channels
-    if (chatJid.startsWith('dc:')) return processDiscordCatchAllMessages(chatJid);
-    return true;
-  }
+  if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
@@ -447,18 +332,11 @@ async function startMessageLoop(): Promise<void> {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
 
-      // Also check for trigger messages from unregistered Discord channels
-      const { messages: catchAllMessages, newTimestamp: catchAllTimestamp } =
-        getNewDiscordCatchAllMessages(jids, lastTimestamp, ASSISTANT_NAME);
-
-      const effectiveTimestamp =
-        newTimestamp > catchAllTimestamp ? newTimestamp : catchAllTimestamp;
-
-      if (messages.length > 0 || catchAllMessages.length > 0) {
-        logger.info({ count: messages.length, catchAllCount: catchAllMessages.length }, 'New messages');
+      if (messages.length > 0) {
+        logger.info({ count: messages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
-        lastTimestamp = effectiveTimestamp;
+        lastTimestamp = newTimestamp;
         saveState();
 
         // Deduplicate by group
@@ -525,53 +403,6 @@ async function startMessageLoop(): Promise<void> {
           }
         }
 
-        // Process trigger messages from unregistered Discord channels (catch-all)
-        if (catchAllMessages.length > 0) {
-          const catchAllByChannel = new Map<string, NewMessage[]>();
-          for (const msg of catchAllMessages) {
-            const existing = catchAllByChannel.get(msg.chat_jid);
-            if (existing) {
-              existing.push(msg);
-            } else {
-              catchAllByChannel.set(msg.chat_jid, [msg]);
-            }
-          }
-
-          for (const [chatJid, channelMessages] of catchAllByChannel) {
-            // Confirm exact trigger match (DB query uses LIKE '@%' as pre-filter only)
-            const hasTrigger = channelMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
-            );
-            if (!hasTrigger) continue;
-
-            const channel = findChannel(channels, chatJid);
-            if (!channel) continue;
-
-            // Pull full context since last agent response for this channel
-            const allPending = getMessagesSince(
-              chatJid,
-              lastAgentTimestamp[chatJid] || '',
-              ASSISTANT_NAME,
-            );
-            const messagesToSend = allPending.length > 0 ? allPending : channelMessages;
-            const formatted = formatMessages(messagesToSend);
-
-            if (queue.sendMessage(chatJid, formatted)) {
-              logger.debug(
-                { chatJid, count: messagesToSend.length },
-                'Piped catch-all messages to active container',
-              );
-              lastAgentTimestamp[chatJid] =
-                messagesToSend[messagesToSend.length - 1].timestamp;
-              saveState();
-              channel.setTyping?.(chatJid, true)?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
-            } else {
-              queue.enqueueMessageCheck(chatJid);
-            }
-          }
-        }
       }
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
@@ -597,20 +428,6 @@ function recoverPendingMessages(): void {
     }
   }
 
-  // Also recover pending catch-all Discord channel messages (unregistered dc: JIDs
-  // that we've seen before, tracked via lastAgentTimestamp keys).
-  for (const [chatJid, cursor] of Object.entries(lastAgentTimestamp)) {
-    if (!chatJid.startsWith('dc:') || registeredGroups[chatJid]) continue;
-    const pending = getMessagesSince(chatJid, cursor, ASSISTANT_NAME);
-    const hasTrigger = pending.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
-    if (hasTrigger) {
-      logger.info(
-        { chatJid, pendingCount: pending.length },
-        'Recovery: found unprocessed catch-all Discord messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
-    }
-  }
 }
 
 function ensureContainerSystemRunning(): void {

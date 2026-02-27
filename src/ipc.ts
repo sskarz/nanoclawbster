@@ -5,7 +5,6 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
-  DISCORD_CATCH_ALL_FOLDER,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
@@ -79,9 +78,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup) ||
-                  // Discord catch-all group may send to any dc: JID it was invoked for
-                  (sourceGroup === DISCORD_CATCH_ALL_FOLDER && (data.chatJid as string).startsWith('dc:'))
+                  (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
                   // Resolve file attachment paths (security: no path traversal)
                   const attachmentsDir = path.join(ipcBaseDir, sourceGroup, 'attachments');

@@ -118,32 +118,12 @@ export class DiscordChannel implements Channel {
       // Store chat metadata for discovery
       this.opts.onChatMetadata(chatJid, timestamp, chatName);
 
-      // Only deliver full message for registered groups.
-      // For unregistered Discord channels, store trigger messages for the
-      // catch-all agent (attachments are skipped — no group folder available).
+      // Only deliver messages for registered groups; ignore unregistered channels.
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
-        const hasTrigger = TRIGGER_PATTERN.test(content.trim());
-        if (!hasTrigger) {
-          logger.debug(
-            { chatJid, chatName },
-            'Non-trigger message from unregistered Discord channel, dropping',
-          );
-          return;
-        }
-        // Store trigger message so catch-all routing can pick it up
-        this.opts.onMessage(chatJid, {
-          id: msgId,
-          chat_jid: chatJid,
-          sender,
-          sender_name: senderName,
-          content,
-          timestamp,
-          is_from_me: false,
-        });
-        logger.info(
-          { chatJid, chatName, sender: senderName },
-          'Discord catch-all trigger message stored',
+        logger.debug(
+          { chatJid, chatName },
+          'Message from unregistered Discord channel, ignoring',
         );
         return;
       }

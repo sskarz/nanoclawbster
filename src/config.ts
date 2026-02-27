@@ -35,9 +35,6 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
-// Catch-all folder for unregistered Discord channels. Any Discord channel
-// where someone @mentions the bot will be routed to this shared agent session.
-export const DISCORD_CATCH_ALL_FOLDER = 'discord';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclawbster-agent:latest';
