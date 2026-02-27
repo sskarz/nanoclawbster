@@ -16,6 +16,7 @@ import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
+  writeStatsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
@@ -27,6 +28,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getStats,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -257,6 +259,9 @@ async function runAgent(
       next_run: t.next_run,
     })),
   );
+
+  // Write stats snapshot for the container to read
+  writeStatsSnapshot(group.folder, getStats());
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
