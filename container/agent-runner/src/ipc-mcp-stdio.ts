@@ -86,14 +86,14 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
-\u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
+SCHEDULE VALUE FORMAT (all times are PST/PDT \u2014 America/Los_Angeles):
+\u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am PST)
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
-\u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
+\u2022 once: PST/PDT time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
   {
     prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
     schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
+    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: PST/PDT timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
     context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
   },
@@ -119,14 +119,14 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     } else if (args.schedule_type === 'once') {
       if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" \u2014 use format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Timestamp must be PST/PDT time without timezone suffix. Got "${args.schedule_value}" \u2014 use format like "2026-02-01T15:30:00".` }],
           isError: true,
         };
       }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use PST/PDT format like "2026-02-01T15:30:00".` }],
           isError: true,
         };
       }
@@ -314,7 +314,7 @@ server.tool(
 
 server.tool(
   'restart_self',
-  'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+  'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup \u2014 do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},
   async () => {
     // Write a flag file so the next startup knows a restart just happened
@@ -338,7 +338,7 @@ server.tool(
 
 server.tool(
   'rebuild_self',
-  'Rebuild the NanoClawbster agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+  'Rebuild the NanoClawbster agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes \u2014 always use send_message BEFORE calling this to warn the user. The host automatically sends a "Back online!" notification on startup \u2014 do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},
   async () => {
     // Write a restart flag so the back-online notification fires after the rebuild+restart

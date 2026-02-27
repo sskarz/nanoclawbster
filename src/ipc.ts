@@ -254,15 +254,42 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
+          // Parse the naive local timestamp as TIMEZONE (PST/PDT) rather than
+          // the host server's system timezone, which may differ from users' timezone.
+          // Strategy: treat the value as UTC first, then shift by the TZ offset at
+          // that approximate moment using Intl.DateTimeFormat.
+          const naiveUtc = new Date(data.schedule_value + 'Z');
+          if (isNaN(naiveUtc.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
             break;
           }
-          nextRun = scheduled.toISOString();
+          try {
+            const formatter = new Intl.DateTimeFormat('en-CA', {
+              timeZone: TIMEZONE,
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: false,
+            });
+            const parts = formatter.formatToParts(naiveUtc);
+            const p = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+            const hour = p.hour === '24' ? '00' : p.hour;
+            const localFromUtc = new Date(`${p.year}-${p.month}-${p.day}T${hour}:${p.minute}:${p.second}Z`);
+            const offsetMs = naiveUtc.getTime() - localFromUtc.getTime();
+            nextRun = new Date(naiveUtc.getTime() + offsetMs).toISOString();
+          } catch {
+            logger.warn(
+              { scheduleValue: data.schedule_value, timezone: TIMEZONE },
+              'Failed to parse timestamp in timezone',
+            );
+            break;
+          }
         }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
