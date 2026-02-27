@@ -36,14 +36,22 @@ This branch is local only — Composio handles the GitHub branch when you push.
 
 Make your changes in `/workspace/dev/src/` (host code) or `/workspace/dev/container/` (agent code).
 
-**Always test before pushing:**
+**Always test before pushing — ALL of the following steps are mandatory:**
 
-| What Changed | How to Test |
-|-------------|-------------|
-| `src/*.ts` (host code) | `cd /workspace/dev && npm run build` |
-| `container/agent-runner/src/*.ts` | `cd /workspace/dev/container/agent-runner && npm run build` |
-| `container/Dockerfile` or agent-runner | Call `test_container_build` tool, then poll `/workspace/dev/.build-result.json` |
-| `container/skills/*` | No build needed — skills are copied on container start |
+| What Changed | Build Check | Functional Test |
+|-------------|-------------|-------------------|
+| `src/*.ts` (host code) | `/app/node_modules/.bin/tsc --noEmit` — verify no errors in changed files | Test the actual behavior (e.g. schedule a task, send a message, trigger the feature) |
+| `container/agent-runner/src/*.ts` | `cd /workspace/dev/container/agent-runner && /app/node_modules/.bin/tsc --noEmit` | Test via the agent (e.g. send a message that exercises the changed tool) |
+| `container/Dockerfile` or agent-runner | Call `test_container_build` tool, then poll `/workspace/dev/.build-result.json` until `success: true` | Test the actual feature end-to-end after confirming build |
+| `container/skills/*` | No build needed — skills are copied on container start | Test the skill behavior manually |
+
+**⚠️ CRITICAL: A build passing is NOT the same as the feature working.**
+You MUST do a real functional test that exercises the actual behavior you changed. Examples:
+- Fixing task scheduling → actually schedule a `once` task and verify it fires at the right time
+- Adding a new command → actually run the command and verify the output
+- Changing message routing → actually send a message and verify it routes correctly
+
+Unit-level logic checks (Node.js one-liners in bash) do NOT count as functional tests.
 
 ### 4. Determine Changed Files
 
@@ -96,11 +104,22 @@ The host will pull, build, and restart. If the build fails, it automatically rol
 
 **If deploy fails:** Use `send_message` to tell the user exactly what happened — include the error message. Ask them how they'd like to proceed. Do NOT silently retry or move on. The user may need to fix something in the host environment that you can't access from the container.
 
+### 9. Post-Deploy Verification
+
+After `pull_and_deploy` completes and the service is back online:
+
+1. **Check logs** — `tail /workspace/project/logs/nanoclaw.log` to confirm the service started cleanly with no errors
+2. **Do a real end-to-end test** — exercise the feature you just deployed and verify it works correctly in the live environment
+3. Report results to the user
+
 ## Safety Rules
 
-- **Always test before pushing** — run the appropriate build command
+- **Always test before pushing** — run the build AND a real functional test (see Step 3 above)
+- **Never skip functional testing** — sans has explicitly required this. A build passing is not enough.
 - **Always create a PR** — never push directly to main
 - **Always notify the user** before deploying (restart incoming)
-- **Always ask the user when stuck** — if any step fails (build, push, deploy), send the error to the user and ask for direction rather than silently retrying or giving up
+- **Always check logs after deploy** — confirm the service came up cleanly in `nanoclaw.log`
+- **Always do a post-deploy end-to-end test** — verify the feature works in the live environment
+- **Always ask the user when stuck** — if any step fails (build, test, push, deploy), send the error to the user and ask for direction rather than silently retrying or giving up
 - **One logical change per PR** — keep PRs focused and reviewable
 - **Read before editing** — understand existing code patterns
