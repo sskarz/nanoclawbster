@@ -286,6 +286,33 @@ Use available_groups.json to find the JID for a group. The folder name should be
 );
 
 server.tool(
+  'get_stats',
+  'Get a quick summary of system stats: messages today, total messages, registered groups, active scheduled tasks, and uptime.',
+  {},
+  async () => {
+    const statsFile = path.join(IPC_DIR, 'stats.json');
+    try {
+      if (!fs.existsSync(statsFile)) {
+        return { content: [{ type: 'text' as const, text: 'Stats not available yet.' }] };
+      }
+      const stats = JSON.parse(fs.readFileSync(statsFile, 'utf-8'));
+      const text = [
+        `\uD83D\uDCCA *System Stats*`,
+        `\u2022 Messages today: ${stats.messagesToday}`,
+        `\u2022 Total messages: ${stats.totalMessages}`,
+        `\u2022 Registered groups: ${stats.registeredGroups}`,
+        `\u2022 Active scheduled tasks: ${stats.activeTasks}`,
+        `\u2022 Paused tasks: ${stats.pausedTasks}`,
+        `\u2022 Uptime: ${stats.uptime}`,
+      ].join('\n');
+      return { content: [{ type: 'text' as const, text }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Error reading stats: ${err}` }] };
+    }
+  },
+);
+
+server.tool(
   'restart_self',
   'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   {},

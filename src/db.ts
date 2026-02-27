@@ -600,6 +600,51 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
+// --- Stats ---
+
+export interface SystemStats {
+  messagesToday: number;
+  totalMessages: number;
+  registeredGroups: number;
+  activeTasks: number;
+  pausedTasks: number;
+  uptime: string;
+}
+
+export function getStats(): SystemStats {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const startOfDayIso = startOfDay.toISOString();
+
+  const messagesToday = (db.prepare(
+    `SELECT COUNT(*) as count FROM messages WHERE timestamp >= ? AND is_bot_message = 0`,
+  ).get(startOfDayIso) as { count: number }).count;
+
+  const totalMessages = (db.prepare(
+    `SELECT COUNT(*) as count FROM messages WHERE is_bot_message = 0`,
+  ).get() as { count: number }).count;
+
+  const registeredGroups = (db.prepare(
+    `SELECT COUNT(*) as count FROM registered_groups`,
+  ).get() as { count: number }).count;
+
+  const activeTasks = (db.prepare(
+    `SELECT COUNT(*) as count FROM scheduled_tasks WHERE status = 'active'`,
+  ).get() as { count: number }).count;
+
+  const pausedTasks = (db.prepare(
+    `SELECT COUNT(*) as count FROM scheduled_tasks WHERE status = 'paused'`,
+  ).get() as { count: number }).count;
+
+  const uptimeSeconds = Math.floor(process.uptime());
+  const h = Math.floor(uptimeSeconds / 3600);
+  const m = Math.floor((uptimeSeconds % 3600) / 60);
+  const s = uptimeSeconds % 60;
+  const uptime = h > 0 ? `${h}h ${m}m ${s}s` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+
+  return { messagesToday, totalMessages, registeredGroups, activeTasks, pausedTasks, uptime };
+}
+
 // --- JSON migration ---
 
 function migrateJsonState(): void {

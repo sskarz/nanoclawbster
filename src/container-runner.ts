@@ -657,6 +657,23 @@ export function writeTasksSnapshot(
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
 }
 
+export function writeStatsSnapshot(
+  groupFolder: string,
+  stats: {
+    messagesToday: number;
+    totalMessages: number;
+    registeredGroups: number;
+    activeTasks: number;
+    pausedTasks: number;
+    uptime: string;
+  },
+): void {
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+  const statsFile = path.join(groupIpcDir, 'stats.json');
+  fs.writeFileSync(statsFile, JSON.stringify({ ...stats, generatedAt: new Date().toISOString() }, null, 2));
+}
+
 export interface AvailableGroup {
   jid: string;
   name: string;
