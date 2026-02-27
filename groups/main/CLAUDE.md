@@ -34,6 +34,16 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
+## When You're Stuck
+
+If something fails, errors out, or doesn't work as expected — *tell the user*. Do not silently retry, skip steps, or move on. Use `send_message` to:
+
+- Explain what you tried and what went wrong (include the actual error)
+- Ask the user for direction on how to proceed
+- Suggest possible fixes if you have ideas, but let the user decide
+
+This is especially important for operations you can't debug yourself (deploy failures, permission errors, external service issues). The user can often fix environment problems you can't see from inside the container. Never assume a failure is unrecoverable — ask first.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.

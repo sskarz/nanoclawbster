@@ -572,13 +572,19 @@ export async function processTaskIpc(
         }
       }
 
-      // 6. Sync dev workspace to match the deployed branch
+      // 6. Sync dev workspace to match the deployed branch (only if clean)
       const devWorkspaceDir = path.join(DATA_DIR, 'dev-workspace');
       if (fs.existsSync(devWorkspaceDir)) {
         try {
+          const devStatus = execSyncDeploy('git status --porcelain', { cwd: devWorkspaceDir, encoding: 'utf-8', timeout: 10_000 }).trim();
+          if (devStatus) {
+            logger.warn({ changedFiles: devStatus.split('\n').length }, 'Dev workspace has uncommitted changes — stashing before sync');
+            execSyncDeploy('git stash push -m "auto-stash before deploy sync"', { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 30_000 });
+          }
           execSyncDeploy(`git fetch origin ${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 60_000 });
+          execSyncDeploy(`git checkout ${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 30_000 });
           execSyncDeploy(`git reset --hard origin/${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 30_000 });
-          logger.info('Dev workspace synced to deployed branch');
+          logger.info({ hadUncommitted: !!devStatus }, 'Dev workspace synced to deployed branch');
         } catch (err) {
           logger.warn({ err }, 'Dev workspace sync failed — non-fatal');
         }

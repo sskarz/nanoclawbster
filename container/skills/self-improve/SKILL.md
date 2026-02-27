@@ -92,13 +92,15 @@ Once the user confirms the PR is merged:
 2. Call `pull_and_deploy` tool (branch: "main")
 3. Wrap remaining output in `<internal>` tags
 
-The host will pull, build, and restart. If the build fails, it automatically rolls back to the previous version — tell the user and iterate.
+The host will pull, build, and restart. If the build fails, it automatically rolls back to the previous version.
+
+**If deploy fails:** Use `send_message` to tell the user exactly what happened — include the error message. Ask them how they'd like to proceed. Do NOT silently retry or move on. The user may need to fix something in the host environment that you can't access from the container.
 
 ## Safety Rules
 
 - **Always test before pushing** — run the appropriate build command
 - **Always create a PR** — never push directly to main
 - **Always notify the user** before deploying (restart incoming)
+- **Always ask the user when stuck** — if any step fails (build, push, deploy), send the error to the user and ask for direction rather than silently retrying or giving up
 - **One logical change per PR** — keep PRs focused and reviewable
 - **Read before editing** — understand existing code patterns
-- If deploy fails, rollback is automatic. Tell the user what went wrong and fix it in a new PR.
