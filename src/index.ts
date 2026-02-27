@@ -3,700 +3,292 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  DISCORD_BOT_TOKEN,
-  DISCORD_CATCH_ALL_FOLDER,
-  DISCORD_ONLY,
+  CONTAINER_TIMEOUT,
+  DATA_DIR,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
-  MAIN_GROUP_FOLDER,
-  POLL_INTERVAL,
-  TRIGGER_PATTERN,
 } from './config.js';
-import { DiscordChannel } from './channels/discord.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-  writeGroupsSnapshot,
-  writeStatsSnapshot,
-  writeTasksSnapshot,
-} from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
-import {
-  getAllChats,
-  getAllRegisteredGroups,
-  getAllSessions,
-  getAllTasks,
-  getMessagesSince,
-  getNewDiscordCatchAllMessages,
-  getNewMessages,
-  getRouterState,
-  getStats,
-  initDatabase,
-  setRegisteredGroup,
-  setRouterState,
-  setSession,
-  storeChatMetadata,
-  storeMessage,
-} from './db.js';
-import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { runContainerAgent, writeGroupsSnapshot, writeStatsSnapshot, writeTasksSnapshot } from './container-runner.js';
+import { Discord } from './channels/discord.js';
+import { WhatsApp } from './channels/whatsapp.js';
+import { Telegram } from './channels/telegram.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
-import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { GroupQueue } from './group-queue.js';
+import { startTaskScheduler } from './task-scheduler.js';
+import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { readDb } from './db.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
 
-// Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from './router.js';
-
-let lastTimestamp = '';
-let sessions: Record<string, string> = {};
-let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
-let messageLoopRunning = false;
-
-let whatsapp: WhatsAppChannel;
-const channels: Channel[] = [];
-const queue = new GroupQueue();
-
-// Synthetic group registration for the Discord catch-all path.
-// Unregistered Discord channels are routed through this shared session.
-// It is NOT stored in the registered_groups DB table.
-let discordCatchAllGroup: RegisteredGroup | null = null;
-
-function ensureDiscordCatchAllGroup(): RegisteredGroup | null {
-  if (discordCatchAllGroup) return discordCatchAllGroup;
-  const folder = DISCORD_CATCH_ALL_FOLDER;
-  try {
-    const groupDir = resolveGroupFolderPath(folder);
-    fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-  } catch (err) {
-    logger.error({ folder, err }, 'Failed to create Discord catch-all group folder');
-    return null;
-  }
-  discordCatchAllGroup = {
-    name: 'Discord (catch-all)',
-    folder,
-    trigger: `@${ASSISTANT_NAME}`,
-    added_at: new Date().toISOString(),
-    requiresTrigger: true,
-  };
-  logger.info({ folder }, 'Discord catch-all group initialized');
-  return discordCatchAllGroup;
-}
-
-function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
-  const agentTs = getRouterState('last_agent_timestamp');
-  try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
-  } catch {
-    logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
-  }
-  sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
-  logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
-    'State loaded',
-  );
-}
-
-function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
-}
-
-function registerGroup(jid: string, group: RegisteredGroup): void {
-  let groupDir: string;
-  try {
-    groupDir = resolveGroupFolderPath(group.folder);
-  } catch (err) {
-    logger.warn(
-      { jid, folder: group.folder, err },
-      'Rejecting group registration with invalid folder',
-    );
-    return;
-  }
-
-  registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
-
-  // Create group folder
-  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-
-  logger.info(
-    { jid, name: group.name, folder: group.folder },
-    'Group registered',
-  );
-}
-
-/**
- * Get available groups list for the agent.
- * Returns groups ordered by most recent activity.
- */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
-  const chats = getAllChats();
-  const registeredJids = new Set(Object.keys(registeredGroups));
-
-  return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
-    .map((c) => ({
-      jid: c.jid,
-      name: c.name,
-      lastActivity: c.last_message_time,
-      isRegistered: registeredJids.has(c.jid),
-    }));
-}
+import path from 'path';
+import fs from 'fs';
 
 /** @internal - exported for testing */
-export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
-  registeredGroups = groups;
+export function resolveRegisteredGroupsPath() {
+  return path.join(DATA_DIR, 'registered_groups.json');
 }
 
-/**
- * Process pending messages from an unregistered Discord channel.
- * Routes to the shared "discord" catch-all group but responds in the
- * originating channel (chatJid preserved independently of groupFolder).
- */
-async function processDiscordCatchAllMessages(chatJid: string): Promise<boolean> {
-  const group = ensureDiscordCatchAllGroup();
-  if (!group) return true;
-
-  const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    logger.warn({ chatJid }, 'No channel found for Discord catch-all JID');
-    return true;
-  }
-
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-
-  if (missedMessages.length === 0) return true;
-
-  // Always require trigger for unregistered channels
-  const hasTrigger = missedMessages.some((m) =>
-    TRIGGER_PATTERN.test(m.content.trim()),
-  );
-  if (!hasTrigger) return true;
-
-  const prompt = formatMessages(missedMessages);
-
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
-
-  logger.info(
-    { chatJid, messageCount: missedMessages.length },
-    'Processing Discord catch-all messages',
-  );
-
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  const resetIdleTimer = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      logger.debug({ chatJid }, 'Idle timeout, closing catch-all container stdin');
-      queue.closeStdin(chatJid);
-    }, IDLE_TIMEOUT);
-  };
-
-  await channel.setTyping?.(chatJid, true);
-  let hadError = false;
-  let outputSentToUser = false;
-
-  await runAgent(group, prompt, chatJid, async (result) => {
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ chatJid }, `Catch-all agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
-      }
-      resetIdleTimer();
-    }
-    if (result.status === 'success') queue.notifyIdle(chatJid);
-    if (result.status === 'error') hadError = true;
-  });
-
-  await channel.setTyping?.(chatJid, false);
-  if (idleTimer) clearTimeout(idleTimer);
-
-  if (hadError) {
-    if (outputSentToUser) {
-      logger.warn({ chatJid }, 'Catch-all agent error after output, skipping cursor rollback');
-      return true;
-    }
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
-    logger.warn({ chatJid }, 'Catch-all agent error, rolled back message cursor for retry');
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Process all pending messages for a group.
- * Called by the GroupQueue when it's this group's turn.
- */
-async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
-  if (!group) {
-    // Fallback: Discord catch-all routing for unregistered dc: channels
-    if (chatJid.startsWith('dc:')) return processDiscordCatchAllMessages(chatJid);
-    return true;
-  }
-
-  const channel = findChannel(channels, chatJid);
-  if (!channel) {
-    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-    return true;
-  }
-
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-
-  if (missedMessages.length === 0) return true;
-
-  // Check trigger requirement:
-  // - Non-main groups require a trigger by default (unless requiresTrigger is explicitly false)
-  // - Main group also checks trigger if requiresTrigger is explicitly set to true
-  const needsTrigger = group.requiresTrigger === true ||
-    (!isMainGroup && group.requiresTrigger !== false);
-  if (needsTrigger) {
-    const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
-    );
-    if (!hasTrigger) return true;
-  }
-
-  const prompt = formatMessages(missedMessages);
-
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
-
-  logger.info(
-    { group: group.name, messageCount: missedMessages.length },
-    'Processing messages',
-  );
-
-  // Track idle timer for closing stdin when agent is idle
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const resetIdleTimer = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
-      queue.closeStdin(chatJid);
-    }, IDLE_TIMEOUT);
-  };
-
-  await channel.setTyping?.(chatJid, true);
-  let hadError = false;
-  let outputSentToUser = false;
-
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
-      }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
-
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
-
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
-
-  await channel.setTyping?.(chatJid, false);
-  if (idleTimer) clearTimeout(idleTimer);
-
-  if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
-    if (outputSentToUser) {
-      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
-      return true;
-    }
-    // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
-    logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
-    return false;
-  }
-
-  return true;
-}
-
-async function runAgent(
-  group: RegisteredGroup,
-  prompt: string,
-  chatJid: string,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
-  const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionId = sessions[group.folder];
-
-  // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    group.folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
-
-  // Write stats snapshot for the container to read
-  writeStatsSnapshot(group.folder, getStats());
-
-  // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isMain,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
-
-  // Wrap onOutput to track session ID from streamed results
-  const wrappedOnOutput = onOutput
-    ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-        }
-        await onOutput(output);
-      }
-    : undefined;
-
+export function loadRegisteredGroups(): RegisteredGroup[] {
+  const path = resolveRegisteredGroupsPath();
+  if (!fs.existsSync(path)) return [];
   try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt,
-        sessionId,
-        groupFolder: group.folder,
+    return JSON.parse(fs.readFileSync(path, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+export function saveRegisteredGroups(groups: RegisteredGroup[]) {
+  const path = resolveRegisteredGroupsPath();
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(path, JSON.stringify(groups, null, 2));
+}
+
+/**
+ * Register a new group, adding it to the persistent storage.
+ * Safe to call from multiple paths - checks for duplicates.
+ */
+export function registerGroup(group: RegisteredGroup): { success: boolean; alreadyExisted: boolean } {
+  const groups = loadRegisteredGroups();
+  const existing = groups.find((g) => g.folder === group.folder);
+  if (existing) return { success: true, alreadyExisted: true };
+  groups.push(group);
+  saveRegisteredGroups(groups);
+  return { success: true, alreadyExisted: false };
+}
+
+/**
+ * Get all available WhatsApp groups for display to the main group.
+ */
+export function getAvailableGroups() {
+  if (!whatsapp) return [];
+  const allGroups = whatsapp.getAllGroups();
+  const registered = loadRegisteredGroups();
+  const registeredJids = new Set(registered.map((g) => g.folder));
+
+  return allGroups.map((group) => ({
+    jid: group.jid,
+    name: group.name || 'Unknown',
+    lastActivity: group.lastActivity,
+    isRegistered: registeredJids.has(group.jid),
+  }));
+}
+
+let whatsapp: WhatsApp | undefined;
+// Exposed for testing
+/** @internal */
+export function getWhatsApp() { return whatsapp; }
+
+async function main() {
+  const channels: Channel[] = [];
+
+  // Discord -- try to connect if configured
+  let discord: Discord | undefined;
+  let telegram: Telegram | undefined;
+  try {
+    discord = new Discord();
+    await discord.connect();
+    channels.push(discord);
+    logger.info('Discord connected');
+  } catch (err) {
+    logger.warn({ err }, 'Discord not configured or failed to connect');
+  }
+  try {
+    telegram = new Telegram();
+    await telegram.connect();
+    channels.push(telegram);
+    logger.info('Telegram connected');
+  } catch (err) {
+    logger.warn({ err }, 'Telegram not configured or failed to connect');
+  }
+
+  // WhatsApp -- try to connect if configured
+  try {
+    whatsapp = new WhatsApp();
+    await whatsapp.connect();
+    channels.push(whatsapp);
+    logger.info('WhatsApp connected');
+  } catch err {
+    logger.warn({ err }, 'WhatsApp not configured or failed to connect');
+  }
+
+  if (channels.length === 0) {
+    logger.error('No channels connected');
+    process.exit(1);
+  }
+
+  const queue = new GroupQueue();
+
+  // Registered groups in memory (loaded from disk)
+  let registeredGroups: RegisteredGroup[] = loadRegisteredGroups();
+  logger.info(
+    { count: registeredGroups.length },
+    'Loaded registered groups',
+  );
+
+  // Keep registeredGroups in sync with disk
+  const reloadRegisteredGroups = () => {
+    registeredGroups = loadRegisteredGroups();
+  };
+
+  // Discord routing -- use Discord JIDs directly for catch-all routing
+  const discordRouting = async (
+    chatJid: string,
+    message: NewMessage,
+  ) => {
+    // Find a matching registered group for this Discord channel/DM
+    const matchedGroup = registeredGroups.find((g) => {
+      const gjid = g.folder;
+      // Check for direct JID match
+      if (gjid === chatJid) return true;
+      // Check for Discord prefixed JID
+      if (gjid.startsWith('dc:') && gjid === chatJid) return true;
+      return false;
+    });
+
+    if (matchedGroup) {
+      // Use the matched group's configuration
+      const raw = message.content;
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      if (!text) return;
+
+      await channel.setTyping?.(chatJid, true);
+      const isMain = matchedGroup.folder === channels.find((c) => c.ownsJid(chatJid))?.constructor.name;
+      await queue.enqueue(chatJid, {
+        group: matchedGroup,
+        prompt: formatMessages([message]),
         chatJid,
-        isMain,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
-      wrappedOnOutput,
+        isMain: false,
+      });
+      return;
+    }
+  };
+
+  // Typing indicator tracking
+  let channel: Channel | undefined;
+  for (const c of channels) {
+    if (c instanceof Discord) {
+      channel = c;
+      break;
+    }
+  }
+
+  const onInboundMessage = async (chatJid: string, message: NewMessage) => {
+    // Ignore messages from ourselves
+    if (message.is_from_me || message.is_bot_message) return;
+
+    // Reload registered groups from disk on each message to pick up new registrations
+    reloadRegisteredGroups();
+
+    // Discord catch-all routing
+    if (chatJid.startsWith('dc:')) {
+      const discordChannel = findChannel(channels, chatJid);
+      if (!discordChannel) {
+        logger.warn({ chatJid }, 'No channel found for Discord JID');
+        return;
+      }
+      const raw = message.content;
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      if (!text) return;
+
+      // Find matching registered group for this Discord channel
+      const matchedGroup = registeredGroups.find((g) => {
+        const gjid = g.folder;
+        if (gjid === chatJid) return true;
+        if (gjid.startsWith('dc:') && gjid === chatJid) return true;
+        return false;
+      });
+
+      if (matchedGroup) {
+        // Route to matched registered group
+        await discordChannel.setTyping?.(chatJid, true);
+        queue.enqueue(chatJid, {
+          group: matchedGroup,
+          prompt: formatMessages([message]),
+          chatJid: chatJid,
+          isMain: false,
+        });
+      } else {
+        logger.debug({ chatJid }, 'No matching group for Discord channel, ignoring');
+      }
+      return;
+    }
+
+    // WhatsApp and Telegram routing
+    const group = registeredGroups.find((g) => g.folder === chatJid);
+    if (!group) {
+      logger.debug({ chatJid }, 'Message from unregistered chat, ignoring');
+      return;
+    }
+
+    // Check if this group requires a trigger word
+    const requiresTrigger = group.requiresTrigger !== false; // Default true
+    if (requiresTrigger) {
+      const triggerWord = group.trigger || ASSISTANT_NAME;
+      const mentioned = message.content.includes(triggerWord);
+      if (!mentioned) {
+        logger.debug({ chatJid, triggerWord }, 'Message did not mention trigger word, ignoring');
+        return;
+      }
+    }
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) {
+      logger.warn({ chatJid }, 'No channel found for JID, ignoring');
+      return;
+    }
+
+    // Determine if this is the main group
+    const mainGroup = registeredGroups.find((g) => g.isMain);
+    const isMain = mainGroup?.folder === group.folder;
+
+    // If an active container is running for this chat, pipe the message in
+    if (queue.sendMessage(chatJid, formatMessages([message]))) {
+      logger.info({ chatJid }, 'Message piped to active container');
+      // Show typing indicator while the container processes the piped message
+      channel.setTyping?.(chatJid, true).catch((err) =>
+        logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+      );
+      return;
+    }
+
+    // Start a new container
+    channel.setTyping?.(chatJid, true).catch((err) =>
+      logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
     );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
-    }
+    const chatHistory = await readDb(group.folder, 50);
+    const chatHistoryLast4 = chatHistory.slice(-4);
 
-    if (output.status === 'error') {
-      logger.error(
-        { group: group.name, error: output.error },
-        'Container agent error',
-      );
-      return 'error';
-    }
-
-    return 'success';
-  } catch (err) {
-    logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
-  }
-}
-
-async function startMessageLoop(): Promise<void> {
-  if (messageLoopRunning) {
-    logger.debug('Message loop already running, skipping duplicate start');
-    return;
-  }
-  messageLoopRunning = true;
-
-  logger.info(`NanoClawbster running (trigger: @${ASSISTANT_NAME})`);
-
-  while (true) {
-    try {
-      const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
-
-      // Also check for trigger messages from unregistered Discord channels
-      const { messages: catchAllMessages, newTimestamp: catchAllTimestamp } =
-        getNewDiscordCatchAllMessages(jids, lastTimestamp, ASSISTANT_NAME);
-
-      const effectiveTimestamp =
-        newTimestamp > catchAllTimestamp ? newTimestamp : catchAllTimestamp;
-
-      if (messages.length > 0 || catchAllMessages.length > 0) {
-        logger.info({ count: messages.length, catchAllCount: catchAllMessages.length }, 'New messages');
-
-        // Advance the "seen" cursor for all messages immediately
-        lastTimestamp = effectiveTimestamp;
-        saveState();
-
-        // Deduplicate by group
-        const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of messages) {
-          const existing = messagesByGroup.get(msg.chat_jid);
-          if (existing) {
-            existing.push(msg);
-          } else {
-            messagesByGroup.set(msg.chat_jid, [msg]);
-          }
-        }
-
-        for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
-          if (!group) continue;
-
-          const channel = findChannel(channels, chatJid);
-          if (!channel) {
-            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
-            continue;
-          }
-
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = group.requiresTrigger === true ||
-            (!isMainGroup && group.requiresTrigger !== false);
-
-          // Only act on trigger messages when required.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
-            );
-            if (!hasTrigger) continue;
-          }
-
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
-
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            channel.setTyping?.(chatJid, true)?.catch((err) =>
-              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-            );
-          } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
-          }
-        }
-
-        // Process trigger messages from unregistered Discord channels (catch-all)
-        if (catchAllMessages.length > 0) {
-          const catchAllByChannel = new Map<string, NewMessage[]>();
-          for (const msg of catchAllMessages) {
-            const existing = catchAllByChannel.get(msg.chat_jid);
-            if (existing) {
-              existing.push(msg);
-            } else {
-              catchAllByChannel.set(msg.chat_jid, [msg]);
-            }
-          }
-
-          for (const [chatJid, channelMessages] of catchAllByChannel) {
-            // Confirm exact trigger match (DB query uses LIKE '@%' as pre-filter only)
-            const hasTrigger = channelMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
-            );
-            if (!hasTrigger) continue;
-
-            const channel = findChannel(channels, chatJid);
-            if (!channel) continue;
-
-            // Pull full context since last agent response for this channel
-            const allPending = getMessagesSince(
-              chatJid,
-              lastAgentTimestamp[chatJid] || '',
-              ASSISTANT_NAME,
-            );
-            const messagesToSend = allPending.length > 0 ? allPending : channelMessages;
-            const formatted = formatMessages(messagesToSend);
-
-            if (queue.sendMessage(chatJid, formatted)) {
-              logger.debug(
-                { chatJid, count: messagesToSend.length },
-                'Piped catch-all messages to active container',
-              );
-              lastAgentTimestamp[chatJid] =
-                messagesToSend[messagesToSend.length - 1].timestamp;
-              saveState();
-              channel.setTyping?.(chatJid, true)?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
-            } else {
-              queue.enqueueMessageCheck(chatJid);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      logger.error({ err }, 'Error in message loop');
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-  }
-}
-
-/**
- * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
- */
-function recoverPendingMessages(): void {
-  for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-    if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
-    }
-  }
-
-  // Also recover pending catch-all Discord channel messages (unregistered dc: JIDs
-  // that we've seen before, tracked via lastAgentTimestamp keys).
-  for (const [chatJid, cursor] of Object.entries(lastAgentTimestamp)) {
-    if (!chatJid.startsWith('dc:') || registeredGroups[chatJid]) continue;
-    const pending = getMessagesSince(chatJid, cursor, ASSISTANT_NAME);
-    const hasTrigger = pending.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
-    if (hasTrigger) {
-      logger.info(
-        { chatJid, pendingCount: pending.length },
-        'Recovery: found unprocessed catch-all Discord messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
-    }
-  }
-}
-
-function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
-}
-
-/**
- * Check all registered groups for a restarting.flag file and send
- * "Back online!" if the flag is recent. Runs once at startup so the
- * notification fires without waiting for a user message.
- */
-async function sendRestartNotifications(): Promise<void> {
-  const FIVE_MINUTES = 5 * 60 * 1000;
-
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    const flagPath = path.join(resolveGroupFolderPath(group.folder), 'restarting.flag');
-    try {
-      if (!fs.existsSync(flagPath)) continue;
-
-      const flagData = JSON.parse(fs.readFileSync(flagPath, 'utf-8'));
-      const flagAge = Date.now() - new Date(flagData.timestamp).getTime();
-
-      if (flagAge < FIVE_MINUTES) {
-        const channel = findChannel(channels, jid);
-        if (channel) {
-          logger.info({ group: group.name }, 'Restart flag detected — sending back-online notification');
-          await channel.sendMessage(jid, '✅ Back online!');
-        } else {
-          logger.warn({ jid }, 'Restart flag found but no channel for JID');
-        }
-      } else {
-        logger.info({ group: group.name, ageSeconds: Math.round(flagAge / 1000) }, 'Restart flag is stale, removing');
-      }
-
-      fs.unlinkSync(flagPath);
-    } catch (err) {
-      logger.warn({ group: group.name, err }, 'Restart flag check failed');
-      // Clean up flag even on error
-      try { fs.unlinkSync(flagPath); } catch { /* ignore */ }
-    }
-  }
-}
-
-async function main(): Promise<void> {
-  ensureContainerSystemRunning();
-  initDatabase();
-  logger.info('Database initialized');
-  loadState();
-
-  // Graceful shutdown handlers
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
-    for (const ch of channels) await ch.disconnect();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-
-  // Channel callbacks (shared by all channels)
-  const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
-    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
-      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => registeredGroups,
+    logger.info(
+      { chatJid, group: group.name, isMain },
+      'Enqueuing message for processing',
+    );
+    queue.enqueue(chatJid, {
+      group,
+      prompt: formatMessages(chatHistoryLast4),
+      chatJid,
+      isMain,
+    });
   };
 
-  // Create and connect channels
-  if (DISCORD_BOT_TOKEN) {
-    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
-    channels.push(discord);
-    await discord.connect();
+  // Attach onInboundMessage handler to all channels
+  for (const channel of channels) {
+    channel.onMessage = onInboundMessage;
   }
 
-  if (!DISCORD_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
-  }
+  const onChatMetadata = async (
+    chatJid: string,
+    timestamp: string,
+    name?: string,
+  ) => {
+    // Nothing to do for now
+  };
 
-  // Start subsystems (independently of connection handler)
-  startSchedulerLoop({
-    registeredGroups: () => registeredGroups,
-    getSessions: () => sessions,
-    queue,
+  // Start GroupQueue
+  await queue.start({
+    runContainerAgent,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
@@ -712,7 +304,9 @@ async function main(): Promise<void> {
     sendMessage: (jid, text, files) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text, files);
+      const filtered = formatOutbound(text);
+      if (!filtered) return Promise.resolve();
+      return channel.sendMessage(jid, filtered, files);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
@@ -720,23 +314,34 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
-  queue.setProcessMessagesFn(processGroupMessages);
-  await sendRestartNotifications();
-  recoverPendingMessages();
-  startMessageLoop().catch((err) => {
-    logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
+
+  // Start task scheduler
+  await startTaskScheduler({
+    sendMessage: async (jid, rawText) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        logger.warn({ jid }, 'No channel for task message');
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
+    },
+    runContainerAgent,
+    writeTasksSnapshot,
+    writeStatsSnapshot,
+    channels,
   });
+
+  // Send startup notification to registered groups
+  for (const group of registeredGroups) {
+    const channel = findChannel(channels, group.folder);
+    if (channel) {
+      await channel.sendMessage(group.folder, '✅ Back online!');
+    }
+  }
 }
 
-// Guard: only run when executed directly, not when imported by tests
-const isDirectRun =
-  process.argv[1] &&
-  new URL(import.meta.url).pathname === new URL(`file://${process.argv[1]}`).pathname;
-
-if (isDirectRun) {
-  main().catch((err) => {
-    logger.error({ err }, 'Failed to start NanoClawbster');
-    process.exit(1);
-  });
-}
+main().catch((err) => {
+  logger.fatal({ err }, 'Unhandled error in main');
+  process.exit(1);
+});
