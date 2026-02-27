@@ -258,7 +258,8 @@ export async function processTaskIpc(
           // the host server's system timezone, which may differ from users' timezone.
           // Strategy: treat the value as UTC first, then shift by the TZ offset at
           // that approximate moment using Intl.DateTimeFormat.
-          const naiveUtc = new Date(data.schedule_value + 'Z');
+          const sv = data.schedule_value.replace(/Z$/i, '');
+          const naiveUtc = new Date(sv + 'Z');
           if (isNaN(naiveUtc.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
