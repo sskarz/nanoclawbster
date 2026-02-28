@@ -6,7 +6,6 @@ import {
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
   IDLE_TIMEOUT,
-  MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -21,6 +20,7 @@ import {
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  clearAdminGroupFlag,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -94,6 +94,9 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     return;
   }
 
+  if (group.isAdmin) {
+    clearAdminGroupFlag();
+  }
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
@@ -143,7 +146,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const isAdminGroup = group.isAdmin === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
@@ -151,10 +154,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // Check trigger requirement:
-  // - Non-main groups require a trigger by default (unless requiresTrigger is explicitly false)
-  // - Main group also checks trigger if requiresTrigger is explicitly set to true
+  // - Non-admin groups require a trigger by default (unless requiresTrigger is explicitly false)
+  // - Admin group also checks trigger if requiresTrigger is explicitly set to true
   const needsTrigger = group.requiresTrigger === true ||
-    (!isMainGroup && group.requiresTrigger !== false);
+    (!isAdminGroup && group.requiresTrigger !== false);
   if (needsTrigger) {
     const hasTrigger = missedMessages.some((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
@@ -241,14 +244,14 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const isAdmin = group.isAdmin === true;
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
-    isMain,
+    isAdmin,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -263,11 +266,11 @@ async function runAgent(
   // Write stats snapshot for the container to read
   writeStatsSnapshot(group.folder, getStats());
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Update available groups snapshot (admin group only can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
-    isMain,
+    isAdmin,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
@@ -291,7 +294,7 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        isMain,
+        isAdmin,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -360,9 +363,9 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+          const isAdminGroup = group.isAdmin === true;
           const needsTrigger = group.requiresTrigger === true ||
-            (!isMainGroup && group.requiresTrigger !== false);
+            (!isAdminGroup && group.requiresTrigger !== false);
 
           // Only act on trigger messages when required.
           // Non-trigger messages accumulate in DB and get pulled as

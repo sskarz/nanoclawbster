@@ -14,7 +14,7 @@ export interface MountAllowlist {
   allowedRoots: AllowedRoot[];
   // Glob patterns for paths that should never be mounted (e.g., ".ssh", ".gnupg")
   blockedPatterns: string[];
-  // If true, non-main groups can only mount read-only regardless of config
+  // If true, non-admin groups can only mount read-only regardless of config
   nonMainReadOnly: boolean;
 }
 
@@ -40,6 +40,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  isAdmin?: boolean;
 }
 
 export interface NewMessage {

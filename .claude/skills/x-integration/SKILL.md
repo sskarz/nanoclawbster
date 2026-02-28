@@ -173,7 +173,7 @@ logger.warn({ type: data.type }, 'Unknown IPC task type');
 
 // Replace with:
 default:
-const handled = await handleXIpc(data, sourceGroup, isMain, DATA_DIR);
+const handled = await handleXIpc(data, sourceGroup, isAdmin, DATA_DIR);
 if (!handled) {
     logger.warn({ type: data.type }, 'Unknown IPC task type');
 }
@@ -191,7 +191,7 @@ import { createXTools } from './skills/x-integration/agent.js';
 
 Add to the end of tools array (before the closing `]`):
 ```typescript
-    ...createXTools({ groupFolder, isMain })
+    ...createXTools({ groupFolder, isAdmin })
 ```
 
 ---

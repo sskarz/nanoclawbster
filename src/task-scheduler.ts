@@ -5,7 +5,6 @@ import fs from 'fs';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
-  MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
@@ -86,11 +85,11 @@ async function runTask(
   }
 
   // Update tasks snapshot for container to read (filtered by group)
-  const isMain = task.group_folder === MAIN_GROUP_FOLDER;
+  const isAdmin = group.isAdmin === true;
   const tasks = getAllTasks();
   writeTasksSnapshot(
     task.group_folder,
-    isMain,
+    isAdmin,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -132,7 +131,7 @@ async function runTask(
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
-        isMain,
+        isAdmin,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
       },

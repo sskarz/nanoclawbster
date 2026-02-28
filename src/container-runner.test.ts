@@ -96,7 +96,7 @@ const testInput = {
   prompt: 'Hello',
   groupFolder: 'test-group',
   chatJid: 'test@g.us',
-  isMain: false,
+  isAdmin: false,
 };
 
 function emitOutputMarker(proc: ReturnType<typeof createFakeProcess>, output: ContainerOutput) {

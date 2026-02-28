@@ -32,7 +32,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  isMain: boolean;
+  isAdmin: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
@@ -53,14 +53,14 @@ interface VolumeMount {
 
 function buildVolumeMounts(
   group: RegisteredGroup,
-  isMain: boolean,
+  isAdmin: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const homeDir = os.homedir();
   const groupDir = resolveGroupFolderPath(group.folder);
 
-  if (isMain) {
+  if (isAdmin) {
     // Main gets the project root read-only. Writable paths the agent needs
     // (group folder, IPC, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
@@ -182,7 +182,7 @@ function buildVolumeMounts(
     const validatedMounts = validateAdditionalMounts(
       group.containerConfig.additionalMounts,
       group.name,
-      isMain,
+      isAdmin,
     );
     mounts.push(...validatedMounts);
   }
@@ -238,7 +238,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isAdmin);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclawbster-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -261,7 +261,7 @@ export async function runContainerAgent(
       group: group.name,
       containerName,
       mountCount: mounts.length,
-      isMain: input.isMain,
+      isAdmin: input.isAdmin,
     },
     'Spawning container agent',
   );
@@ -449,7 +449,7 @@ export async function runContainerAgent(
         `=== Container Run Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
-        `IsMain: ${input.isMain}`,
+        `IsMain: ${input.isAdmin}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Stdout Truncated: ${stdoutTruncated}`,
@@ -598,7 +598,7 @@ export async function runContainerAgent(
 
 export function writeTasksSnapshot(
   groupFolder: string,
-  isMain: boolean,
+  isAdmin: boolean,
   tasks: Array<{
     id: string;
     groupFolder: string;
@@ -614,7 +614,7 @@ export function writeTasksSnapshot(
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // Main sees all tasks, others only see their own
-  const filteredTasks = isMain
+  const filteredTasks = isAdmin
     ? tasks
     : tasks.filter((t) => t.groupFolder === groupFolder);
 
@@ -636,7 +636,7 @@ export interface AvailableGroup {
  */
 export function writeGroupsSnapshot(
   groupFolder: string,
-  isMain: boolean,
+  isAdmin: boolean,
   groups: AvailableGroup[],
   registeredJids: Set<string>,
 ): void {
@@ -644,7 +644,7 @@ export function writeGroupsSnapshot(
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // Main sees all groups; others see nothing (they can't activate groups)
-  const visibleGroups = isMain ? groups : [];
+  const visibleGroups = isAdmin ? groups : [];
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

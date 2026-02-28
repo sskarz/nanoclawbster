@@ -20,6 +20,7 @@ interface RegisterArgs {
   trigger: string;
   folder: string;
   requiresTrigger: boolean;
+  isAdmin: boolean;
   assistantName: string;
 }
 
@@ -30,6 +31,7 @@ function parseArgs(args: string[]): RegisterArgs {
     trigger: '',
     folder: '',
     requiresTrigger: true,
+    isAdmin: false,
     assistantName: 'Andy',
   };
 
@@ -40,6 +42,7 @@ function parseArgs(args: string[]): RegisterArgs {
       case '--trigger': result.trigger = args[++i] || ''; break;
       case '--folder': result.folder = args[++i] || ''; break;
       case '--no-trigger-required': result.requiresTrigger = false; break;
+      case '--is-admin': result.isAdmin = true; break;
       case '--assistant-name': result.assistantName = args[++i] || 'Andy'; break;
     }
   }
@@ -88,14 +91,28 @@ export async function run(args: string[]): Promise<void> {
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1
+    requires_trigger INTEGER DEFAULT 1,
+    is_admin INTEGER DEFAULT 0
   )`);
 
+  // Migration: add is_admin column if it doesn't exist (for existing DBs)
+  try {
+    db.exec(`ALTER TABLE registered_groups ADD COLUMN is_admin INTEGER DEFAULT 0`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Clear existing admin flag before inserting a new admin group
+  if (parsed.isAdmin) {
+    db.prepare('UPDATE registered_groups SET is_admin = 0 WHERE is_admin = 1').run();
+  }
+
+  const isAdminInt = parsed.isAdmin ? 1 : 0;
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups
-     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-  ).run(parsed.jid, parsed.name, parsed.folder, parsed.trigger, timestamp, requiresTriggerInt);
+     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_admin)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+  ).run(parsed.jid, parsed.name, parsed.folder, parsed.trigger, timestamp, requiresTriggerInt, isAdminInt);
 
   db.close();
   logger.info('Wrote registration to SQLite');

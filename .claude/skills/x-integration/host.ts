@@ -78,7 +78,7 @@ function writeResult(dataDir: string, sourceGroup: string, requestId: string, re
 export async function handleXIpc(
   data: Record<string, unknown>,
   sourceGroup: string,
-  isMain: boolean,
+  isAdmin: boolean,
   dataDir: string
 ): Promise<boolean> {
   const type = data.type as string;
@@ -89,7 +89,7 @@ export async function handleXIpc(
   }
 
   // Only main group can use X integration
-  if (!isMain) {
+  if (!isAdmin) {
     logger.warn({ sourceGroup, type }, 'X integration blocked: not main group');
     return true;
   }

@@ -24,7 +24,7 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  isMain: boolean;
+  isAdmin: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
@@ -415,7 +415,7 @@ async function runQuery(
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  if (!containerInput.isAdmin && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
@@ -468,7 +468,7 @@ async function runQuery(
           env: {
             NANOCLAWBSTER_CHAT_JID: containerInput.chatJid,
             NANOCLAWBSTER_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAWBSTER_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAWBSTER_IS_ADMIN: containerInput.isAdmin ? '1' : '0',
           },
         },
         ...(sdkEnv.COMPOSIO_API_KEY ? {

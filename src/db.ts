@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { ASSISTANT_NAME, DATA_DIR, MAIN_GROUP_FOLDER, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
@@ -116,6 +116,19 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
   } catch {
     /* columns already exist */
+  }
+
+  // Add is_admin column to registered_groups (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_admin INTEGER DEFAULT 0`,
+    );
+    // Backfill: the group with folder='main' was historically the admin group
+    database.exec(
+      `UPDATE registered_groups SET is_admin = 1 WHERE folder = '${MAIN_GROUP_FOLDER}'`,
+    );
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -521,6 +534,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        is_admin: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -541,6 +555,7 @@ export function getRegisteredGroup(
       ? JSON.parse(row.container_config)
       : undefined,
     requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isAdmin: row.is_admin === 1,
   };
 }
 
@@ -552,8 +567,8 @@ export function setRegisteredGroup(
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_admin)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -562,6 +577,7 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    group.isAdmin ? 1 : 0,
   );
 }
 
@@ -576,6 +592,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    is_admin: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -595,9 +612,25 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         ? JSON.parse(row.container_config)
         : undefined,
       requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      isAdmin: row.is_admin === 1,
     };
   }
   return result;
+}
+
+// --- Admin group helpers ---
+
+/** Check if a group folder belongs to the admin group (for modules that only have a folder string). */
+export function isAdminGroupFolder(folder: string): boolean {
+  const row = db
+    .prepare('SELECT is_admin FROM registered_groups WHERE folder = ?')
+    .get(folder) as { is_admin: number | null } | undefined;
+  return row?.is_admin === 1;
+}
+
+/** Clear the admin flag on all groups (call before setting a new admin group). */
+export function clearAdminGroupFlag(): void {
+  db.prepare('UPDATE registered_groups SET is_admin = 0 WHERE is_admin = 1').run();
 }
 
 // --- Stats ---

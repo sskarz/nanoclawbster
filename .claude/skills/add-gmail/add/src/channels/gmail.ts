@@ -5,7 +5,7 @@ import path from 'path';
 import { google, gmail_v1 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 
-import { MAIN_GROUP_FOLDER } from '../config.js';
+// Admin group lookup no longer uses MAIN_GROUP_FOLDER — uses isAdmin flag
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -265,21 +265,21 @@ export class GmailChannel implements Channel {
     // Store chat metadata for group discovery
     this.opts.onChatMetadata(chatJid, timestamp, subject, 'gmail', false);
 
-    // Find the main group to deliver the email notification
+    // Find the admin group to deliver the email notification
     const groups = this.opts.registeredGroups();
-    const mainEntry = Object.entries(groups).find(
-      ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+    const adminEntry = Object.entries(groups).find(
+      ([, g]) => g.isAdmin === true,
     );
 
-    if (!mainEntry) {
+    if (!adminEntry) {
       logger.debug(
         { chatJid, subject },
-        'No main group registered, skipping email',
+        'No admin group registered, skipping email',
       );
       return;
     }
 
-    const mainJid = mainEntry[0];
+    const mainJid = adminEntry[0];
     const content = `[Email from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
 
     this.opts.onMessage(mainJid, {

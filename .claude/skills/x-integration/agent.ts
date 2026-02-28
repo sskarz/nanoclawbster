@@ -53,14 +53,14 @@ async function waitForResult(requestId: string, maxWait = 60000): Promise<{ succ
 
 export interface SkillToolsContext {
   groupFolder: string;
-  isMain: boolean;
+  isAdmin: boolean;
 }
 
 /**
  * Create X integration MCP tools
  */
 export function createXTools(ctx: SkillToolsContext) {
-  const { groupFolder, isMain } = ctx;
+  const { groupFolder, isAdmin } = ctx;
 
   return [
     tool(
@@ -73,7 +73,7 @@ Make sure the content is appropriate and within X's character limit (280 chars f
         content: z.string().max(280).describe('The tweet content to post (max 280 characters)')
       },
       async (args: { content: string }) => {
-        if (!isMain) {
+        if (!isAdmin) {
           return {
             content: [{ type: 'text', text: 'Only the main group can post tweets.' }],
             isError: true
@@ -113,7 +113,7 @@ Provide the tweet URL or tweet ID to like.`,
         tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123) or tweet ID')
       },
       async (args: { tweet_url: string }) => {
-        if (!isMain) {
+        if (!isAdmin) {
           return {
             content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
             isError: true
@@ -147,7 +147,7 @@ Provide the tweet URL and your reply content.`,
         content: z.string().max(280).describe('The reply content (max 280 characters)')
       },
       async (args: { tweet_url: string; content: string }) => {
-        if (!isMain) {
+        if (!isAdmin) {
           return {
             content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
             isError: true
@@ -181,7 +181,7 @@ Provide the tweet URL to retweet.`,
         tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123) or tweet ID')
       },
       async (args: { tweet_url: string }) => {
-        if (!isMain) {
+        if (!isAdmin) {
           return {
             content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
             isError: true
@@ -215,7 +215,7 @@ Retweet with your own comment added.`,
         comment: z.string().max(280).describe('Your comment for the quote tweet (max 280 characters)')
       },
       async (args: { tweet_url: string; comment: string }) => {
-        if (!isMain) {
+        if (!isAdmin) {
           return {
             content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
             isError: true

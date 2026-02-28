@@ -4,7 +4,6 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
-  MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
@@ -141,7 +140,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const isAdminGroup = group.isAdmin === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
@@ -149,7 +148,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  if (!isAdminGroup && group.requiresTrigger !== false) {
     const hasTrigger = missedMessages.some((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
@@ -235,14 +234,14 @@ async function runAgent(
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
-  const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const isAdmin = group.isAdmin === true;
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
-    isMain,
+    isAdmin,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -258,7 +257,7 @@ async function runAgent(
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
-    isMain,
+    isAdmin,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
@@ -282,7 +281,7 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        isMain,
+        isAdmin,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -351,8 +350,8 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const isAdminGroup = group.isAdmin === true;
+          const needsTrigger = !isAdminGroup && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as

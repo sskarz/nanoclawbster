@@ -19,7 +19,7 @@ const ATTACHMENTS_DIR = path.join(IPC_DIR, 'attachments');
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAWBSTER_CHAT_JID!;
 const groupFolder = process.env.NANOCLAWBSTER_GROUP_FOLDER!;
-const isMain = process.env.NANOCLAWBSTER_IS_MAIN === '1';
+const isAdmin = process.env.NANOCLAWBSTER_IS_ADMIN === '1';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -133,7 +133,7 @@ SCHEDULE VALUE FORMAT (all times are PST/PDT — America/Los_Angeles):
     }
 
     // Non-main groups can only schedule for themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid = isAdmin && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const data = {
       type: 'schedule_task',
@@ -167,7 +167,7 @@ server.tool(
 
       const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
 
-      const tasks = isMain
+      const tasks = isAdmin
         ? allTasks
         : allTasks.filter((t: { createdBy: string }) => t.createdBy === groupFolder);
 
@@ -200,7 +200,7 @@ server.tool(
       type: 'pause_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
+      isAdmin,
       timestamp: new Date().toISOString(),
     };
 
@@ -219,7 +219,7 @@ server.tool(
       type: 'resume_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
+      isAdmin,
       timestamp: new Date().toISOString(),
     };
 
@@ -238,7 +238,7 @@ server.tool(
       type: 'cancel_task',
       taskId: args.task_id,
       groupFolder,
-      isMain,
+      isAdmin,
       timestamp: new Date().toISOString(),
     };
 
@@ -250,7 +250,7 @@ server.tool(
 
 // Main-only tools: only registered when running as the main group so non-main
 // agents never see them in the tool list (prevents hallucinated privilege).
-if (isMain) {
+if (isAdmin) {
 
 server.tool(
   'register_group',

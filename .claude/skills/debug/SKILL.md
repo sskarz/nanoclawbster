@@ -184,7 +184,7 @@ mkdir -p data/env groups/test
 cp .env data/env/env
 
 # Run test query
-echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
+echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isAdmin":false}' | \
   docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
   -v $(pwd)/groups/test:/workspace/group \
