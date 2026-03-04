@@ -148,12 +148,34 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
+  // Skills with `admin-only: true` in frontmatter are skipped for non-admin agents.
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
     for (const skillDir of fs.readdirSync(skillsSrc)) {
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
+
+      // Check frontmatter for admin-only flag
+      if (!isAdmin) {
+        const skillMd = path.join(srcDir, 'SKILL.md');
+        if (fs.existsSync(skillMd)) {
+          const content = fs.readFileSync(skillMd, 'utf-8');
+          if (content.startsWith('---')) {
+            const endIdx = content.indexOf('---', 3);
+            if (endIdx !== -1) {
+              const frontmatter = content.slice(3, endIdx);
+              if (/^admin-only:\s*true$/m.test(frontmatter)) {
+                // Remove stale copy if previously synced
+                const dstDir = path.join(skillsDst, skillDir);
+                if (fs.existsSync(dstDir)) fs.rmSync(dstDir, { recursive: true });
+                continue;
+              }
+            }
+          }
+        }
+      }
+
       const dstDir = path.join(skillsDst, skillDir);
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }

@@ -264,6 +264,33 @@ server.registerTool(
 if (isAdmin) {
 
 server.registerTool(
+  'delegate_task',
+  {
+    description: `Delegate a task to a dedicated coding agent with clean context (no conversation history). The coding agent runs in a separate container with only the task prompt and skill instructions. It reports progress via send_message. This tool returns immediately.`,
+    inputSchema: {
+      task: z.string().describe('Detailed description of what the coding agent should do. Include ALL necessary context — the agent has NO conversation history.'),
+      skill: z.string().optional().describe('Skill name to load (e.g. "self-improve"). Instructions will be prepended to the prompt.'),
+    },
+  },
+  async (args: { task: string; skill?: string }) => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'delegate_task',
+      task: args.task,
+      skill: args.skill || undefined,
+      chatJid,
+      groupFolder,
+    });
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Task delegated to a clean-context coding agent. It will report progress via messages in this chat.${args.skill ? ` Skill "${args.skill}" will be loaded.` : ''}`,
+      }],
+    };
+  },
+);
+
+server.registerTool(
   'register_group',
   {
     description: `Register a new WhatsApp group so the agent can respond to messages there.

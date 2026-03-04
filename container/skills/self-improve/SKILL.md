@@ -1,3 +1,9 @@
+---
+name: self-improve
+description: Write features, fix bugs, and create PRs for the NanoClawbster codebase. Works in an isolated dev workspace, tests locally, pushes via Composio, and deploys after user approval.
+admin-only: true
+---
+
 # Self-Improvement Workflow
 
 Write features, fix bugs, and create PRs for the NanoClawbster codebase. You work in an isolated dev workspace, test locally, push via Composio, and deploy after user approval.

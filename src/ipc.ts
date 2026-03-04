@@ -206,6 +206,9 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For delegate_task
+    task?: string;
+    skill?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isAdmin: boolean, // Verified from directory path
@@ -624,6 +627,75 @@ export async function processTaskIpc(
       // 7. Exit for systemd restart
       logger.info({ buildFailed }, 'Pull and deploy complete — restarting');
       process.exit(0);
+      break;
+    }
+
+    case 'delegate_task': {
+      if (!isAdmin) {
+        logger.warn({ sourceGroup }, 'Unauthorized delegate_task attempt blocked');
+        break;
+      }
+
+      if (!data.task || !data.chatJid) {
+        logger.warn({ data }, 'Invalid delegate_task — missing task or chatJid');
+        break;
+      }
+
+      const delegateGroup = registeredGroups[data.chatJid];
+      if (!delegateGroup) {
+        logger.warn({ chatJid: data.chatJid }, 'Cannot delegate: group not registered');
+        break;
+      }
+
+      // Authorization: non-admin can only delegate to own group
+      if (!isAdmin && delegateGroup.folder !== sourceGroup) {
+        logger.warn(
+          { sourceGroup, targetFolder: delegateGroup.folder },
+          'Unauthorized delegate_task blocked',
+        );
+        break;
+      }
+
+      // Build prompt: skill content (if any) + task description
+      let delegatePrompt = '';
+      if (data.skill) {
+        const skillPath = path.join(
+          path.resolve(import.meta.dirname, '..'),
+          'container',
+          'skills',
+          data.skill,
+          'SKILL.md',
+        );
+        try {
+          if (fs.existsSync(skillPath)) {
+            delegatePrompt += fs.readFileSync(skillPath, 'utf-8') + '\n\n---\n\n';
+          } else {
+            logger.warn({ skill: data.skill }, 'Skill not found for delegate_task');
+          }
+        } catch (err) {
+          logger.warn({ skill: data.skill, err }, 'Failed to read skill file');
+        }
+      }
+      delegatePrompt += data.task;
+
+      // Create immediate one-shot task with isolated context
+      const delegateTaskId = `delegate-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      createTask({
+        id: delegateTaskId,
+        group_folder: delegateGroup.folder,
+        chat_jid: data.chatJid,
+        prompt: delegatePrompt,
+        schedule_type: 'once',
+        schedule_value: new Date().toISOString(),
+        context_mode: 'isolated',
+        next_run: new Date().toISOString(),
+        status: 'active',
+        created_at: new Date().toISOString(),
+      });
+      logger.info(
+        { taskId: delegateTaskId, sourceGroup, skill: data.skill || 'none' },
+        'Delegated task created',
+      );
       break;
     }
 
