@@ -40,15 +40,17 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
-server.tool(
+server.registerTool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
   {
-    text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-    files: z.array(z.string()).optional().describe('Filenames of files to attach (e.g. ["report.pdf"]). Files must be saved to /workspace/ipc/attachments/ first.'),
+    description: "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+    inputSchema: {
+      text: z.string().describe('The message text to send'),
+      sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+      files: z.array(z.string()).optional().describe('Filenames of files to attach (e.g. ["report.pdf"]). Files must be saved to /workspace/ipc/attachments/ first.'),
+    },
   },
-  async (args) => {
+  async (args: { text: string; sender?: string; files?: string[] }) => {
     fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 
     const data: Record<string, string | string[] | undefined> = {
@@ -67,9 +69,10 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   'schedule_task',
-  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
+  {
+    description: `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
 CONTEXT MODE - Choose based on task type:
 • "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
@@ -90,14 +93,15 @@ SCHEDULE VALUE FORMAT (all times are PST/PDT — America/Los_Angeles):
 • cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am PST)
 • interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
 • once: PST/PDT time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
-  {
-    prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: PST/PDT timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
-    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    inputSchema: {
+      prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
+      schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
+      schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: PST/PDT timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
+      context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
+      target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    },
   },
-  async (args) => {
+  async (args: { prompt: string; schedule_type: 'cron' | 'interval' | 'once'; schedule_value: string; context_mode?: 'group' | 'isolated'; target_group_jid?: string }) => {
     // Validate schedule_value before writing IPC
     if (args.schedule_type === 'cron') {
       try {
@@ -154,10 +158,11 @@ SCHEDULE VALUE FORMAT (all times are PST/PDT — America/Los_Angeles):
   },
 );
 
-server.tool(
+server.registerTool(
   'list_tasks',
-  "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
-  {},
+  {
+    description: "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
+  },
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
     try {
@@ -191,11 +196,13 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   'pause_task',
-  'Pause a scheduled task. It will not run until resumed.',
-  { task_id: z.string().describe('The task ID to pause') },
-  async (args) => {
+  {
+    description: 'Pause a scheduled task. It will not run until resumed.',
+    inputSchema: { task_id: z.string().describe('The task ID to pause') },
+  },
+  async (args: { task_id: string }) => {
     const data = {
       type: 'pause_task',
       taskId: args.task_id,
@@ -210,11 +217,13 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   'resume_task',
-  'Resume a paused task.',
-  { task_id: z.string().describe('The task ID to resume') },
-  async (args) => {
+  {
+    description: 'Resume a paused task.',
+    inputSchema: { task_id: z.string().describe('The task ID to resume') },
+  },
+  async (args: { task_id: string }) => {
     const data = {
       type: 'resume_task',
       taskId: args.task_id,
@@ -229,11 +238,13 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   'cancel_task',
-  'Cancel and delete a scheduled task.',
-  { task_id: z.string().describe('The task ID to cancel') },
-  async (args) => {
+  {
+    description: 'Cancel and delete a scheduled task.',
+    inputSchema: { task_id: z.string().describe('The task ID to cancel') },
+  },
+  async (args: { task_id: string }) => {
     const data = {
       type: 'cancel_task',
       taskId: args.task_id,
@@ -252,18 +263,20 @@ server.tool(
 // agents never see them in the tool list (prevents hallucinated privilege).
 if (isAdmin) {
 
-server.tool(
+server.registerTool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there.
+  {
+    description: `Register a new WhatsApp group so the agent can respond to messages there.
 
 Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
-  {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
-    name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
-    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    inputSchema: {
+      jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+      name: z.string().describe('Display name for the group'),
+      folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+      trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    },
   },
-  async (args) => {
+  async (args: { jid: string; name: string; folder: string; trigger: string }) => {
     const data = {
       type: 'register_group',
       jid: args.jid,
@@ -281,10 +294,11 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
-server.tool(
+server.registerTool(
   'get_stats',
-  'Get a quick summary of system stats: messages today, total messages, registered groups, active scheduled tasks, and uptime.',
-  {},
+  {
+    description: 'Get a quick summary of system stats: messages today, total messages, registered groups, active scheduled tasks, and uptime.',
+  },
   async () => {
     const statsFile = path.join(IPC_DIR, 'stats.json');
     try {
@@ -308,10 +322,11 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   'restart_self',
-  'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
-  {},
+  {
+    description: 'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+  },
   async () => {
     // Write a flag file so the next startup knows a restart just happened
     // and can send a "back online" notification automatically.
@@ -332,9 +347,10 @@ server.tool(
   },
 );
 
-server.tool(
+server.registerTool(
   'pull_and_deploy',
-  `Pull merged changes from GitHub into the live codebase and deploy.
+  {
+    description: `Pull merged changes from GitHub into the live codebase and deploy.
 
 Use this AFTER a PR has been merged on GitHub. The host will:
 1. Pull latest from the main branch (via git)
@@ -346,10 +362,11 @@ Use this AFTER a PR has been merged on GitHub. The host will:
 If the build fails, it automatically rolls back to the previous version.
 
 IMPORTANT: Always use send_message BEFORE calling this to warn the user about the restart. After calling, wrap remaining output in <internal> tags.`,
-  {
-    branch: z.string().default('main').describe('Branch to pull (usually "main")'),
+    inputSchema: {
+      branch: z.string().default('main').describe('Branch to pull (usually "main")'),
+    },
   },
-  async (args) => {
+  async (args: { branch: string }) => {
     const restartFlagPath = '/workspace/group/restarting.flag';
     try {
       fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
@@ -373,9 +390,10 @@ IMPORTANT: Always use send_message BEFORE calling this to warn the user about th
   },
 );
 
-server.tool(
+server.registerTool(
   'test_container_build',
-  `Test-build the Docker container image from the dev workspace without deploying.
+  {
+    description: `Test-build the Docker container image from the dev workspace without deploying.
 
 Use this to verify Dockerfile or agent-runner changes compile and build correctly
 before creating a PR. The host builds from /workspace/dev/container/ and writes
@@ -384,7 +402,7 @@ the result to /workspace/dev/.build-result.json.
 After calling this tool, poll the result file:
   cat /workspace/dev/.build-result.json
 It may take 2-5 minutes. The file contains {success, error?, duration_ms, timestamp}.`,
-  {},
+  },
   async () => {
     // Clear any previous result
     try { fs.unlinkSync('/workspace/dev/.build-result.json'); } catch { /* ok */ }
