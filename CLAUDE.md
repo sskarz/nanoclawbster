@@ -71,6 +71,32 @@ To update via Node:
 db.prepare("UPDATE registered_groups SET requires_trigger = 1 WHERE jid LIKE 'dc:%'").run();
 ```
 
+## Admin Privileges & Agent Tools
+
+Each registered group has an `is_admin` flag in the DB (`registered_groups.is_admin`). This controls both tool visibility and IPC authorization.
+
+**Admin-only tools** (only visible to admin agents via MCP):
+- `register_group` — register new groups
+- `get_stats` — usage/system statistics
+- `restart_self` — restart the host service
+- `pull_and_deploy` — pull from GitHub, build, optionally rebuild Docker, restart
+- `test_container_build` — test-build the Docker image without deploying
+
+**All-agent tools** (available to every group):
+- `send_message`, `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`
+
+**How it works:**
+1. **Agent-side gating** (`container/agent-runner/src/ipc-mcp-stdio.ts`): Admin tools are only registered when `NANOCLAWBSTER_IS_ADMIN=1` env var is set. Non-admin agents never see them in the tool list.
+2. **Host-side enforcement** (`src/ipc.ts`): IPC handler checks `isAdminGroupFolder(sourceGroup)` against the DB. Admin-only IPC types are rejected if the source group isn't admin.
+
+**Security:** No agent can modify the `is_admin` flag. The DB (`store/messages.db`) is not writable from any container — admin agents get the project root read-only, and the dev workspace is a git clone (store/ is gitignored). The only way to change admin is from the host machine directly:
+```js
+const Database = require('better-sqlite3');
+const db = new Database('store/messages.db');
+db.prepare('UPDATE registered_groups SET is_admin = 1 WHERE folder = ?').run('your-folder');
+db.prepare('UPDATE registered_groups SET is_admin = 0 WHERE folder = ?').run('old-folder');
+```
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.

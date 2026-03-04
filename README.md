@@ -60,6 +60,22 @@ Discord / WhatsApp ──> SQLite ──> Polling Loop ──> Container (Claude
 
 Single Node.js process. Agents execute in isolated Linux containers with filesystem isolation. Per-group message queue with concurrency control. IPC via filesystem.
 
+### Admin Privileges
+
+Each registered group has an `is_admin` flag in the database. Admin agents get extra tools:
+
+| Tool | Description |
+|------|-------------|
+| `register_group` | Register new groups for the bot |
+| `get_stats` | View usage and system statistics |
+| `restart_self` | Restart the host service |
+| `pull_and_deploy` | Pull from GitHub, build, rebuild Docker if needed, restart |
+| `test_container_build` | Test-build the Docker image without deploying |
+
+All agents (admin or not) have access to: `send_message`, `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`.
+
+Tool visibility is enforced at two levels: admin-only tools are hidden from non-admin agents' MCP tool list, and the host-side IPC handler independently rejects unauthorized requests. No agent can modify the admin flag — the database is not writable from any container.
+
 **Key files:**
 
 | File | What it does |
