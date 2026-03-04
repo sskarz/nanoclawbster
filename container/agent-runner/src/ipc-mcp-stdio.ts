@@ -333,28 +333,6 @@ server.tool(
 );
 
 server.tool(
-  'rebuild_self',
-  'Rebuild the NanoClawbster agent Docker image from source, then restart. Use this after merging PRs that change agent-runner code (container/agent-runner/src/). This takes ~2-5 minutes — always use send_message BEFORE calling this to warn the user. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
-  {},
-  async () => {
-    // Write a restart flag so the back-online notification fires after the rebuild+restart
-    const restartFlagPath = '/workspace/group/restarting.flag';
-    try {
-      fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
-    } catch (err) {
-      console.error(`[nanoclawbster-mcp] Failed to write restart flag: ${err}`);
-    }
-
-    writeIpcFile(TASKS_DIR, {
-      type: 'rebuild',
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    });
-    return { content: [{ type: 'text' as const, text: 'Rebuild command issued. This will take ~2-5 minutes. The host will automatically notify the user when back online.' }] };
-  },
-);
-
-server.tool(
   'pull_and_deploy',
   `Pull merged changes from GitHub into the live codebase and deploy.
 
