@@ -325,19 +325,9 @@ server.registerTool(
 server.registerTool(
   'restart_self',
   {
-    description: 'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. IMPORTANT: Always use send_message BEFORE calling this tool to let the user know you are about to restart. The host automatically sends a "Back online!" notification on startup — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+    description: 'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. The host automatically sends deploy/restart notifications — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   },
   async () => {
-    // Write a flag file so the next startup knows a restart just happened
-    // and can send a "back online" notification automatically.
-    const restartFlagPath = '/workspace/group/restarting.flag';
-    try {
-      fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
-    } catch (err) {
-      // Non-fatal: startup notification just won't fire
-      console.error(`[nanoclawbster-mcp] Failed to write restart flag: ${err}`);
-    }
-
     writeIpcFile(TASKS_DIR, {
       type: 'restart',
       groupFolder,
@@ -361,19 +351,12 @@ Use this AFTER a PR has been merged on GitHub. The host will:
 
 If the build fails, it automatically rolls back to the previous version.
 
-IMPORTANT: Always use send_message BEFORE calling this to warn the user about the restart. After calling, wrap remaining output in <internal> tags.`,
+The host automatically sends deploy/restart notifications — do NOT send one yourself. After calling, wrap remaining output in <internal> tags.`,
     inputSchema: {
       branch: z.string().default('main').describe('Branch to pull (usually "main")'),
     },
   },
   async (args: { branch: string }) => {
-    const restartFlagPath = '/workspace/group/restarting.flag';
-    try {
-      fs.writeFileSync(restartFlagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
-    } catch (err) {
-      console.error(`[nanoclawbster-mcp] Failed to write restart flag: ${err}`);
-    }
-
     writeIpcFile(TASKS_DIR, {
       type: 'pull_and_deploy',
       branch: args.branch,

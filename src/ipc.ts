@@ -10,10 +10,28 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, isAdminGroupFolder, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { formatOutbound } from './router.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+
+/** Find the JID for a source group folder from the registered groups map. */
+function findJidForFolder(
+  registeredGroups: Record<string, RegisteredGroup>,
+  folder: string,
+): string | undefined {
+  return Object.entries(registeredGroups).find(([, g]) => g.folder === folder)?.[0];
+}
+
+/** Write a restarting.flag so the next startup sends a "Back online!" notification. */
+function writeRestartFlag(groupFolder: string): void {
+  try {
+    const flagPath = path.join(resolveGroupFolderPath(groupFolder), 'restarting.flag');
+    fs.writeFileSync(flagPath, JSON.stringify({ timestamp: new Date().toISOString() }));
+  } catch (err) {
+    logger.warn({ groupFolder, err }, 'Failed to write restart flag');
+  }
+}
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, files?: string[]) => Promise<void>;
@@ -429,6 +447,14 @@ export async function processTaskIpc(
 
     case 'restart': {
       logger.info({ sourceGroup }, 'Restart requested via IPC — rebuilding and exiting for service manager restart');
+
+      // Send "restarting" notification and write flag BEFORE execSync blocks the event loop
+      const restartJid = findJidForFolder(registeredGroups, sourceGroup);
+      if (restartJid) {
+        try { await deps.sendMessage(restartJid, '🔄 Restarting — back shortly!'); } catch { /* best-effort */ }
+      }
+      writeRestartFlag(sourceGroup);
+
       // Recompile TypeScript so the restarted process picks up any source changes
       // (e.g. from a merged PR), then exit for systemd Restart=always.
       const { execSync } = await import('child_process');
@@ -492,6 +518,15 @@ export async function processTaskIpc(
         break;
       }
       logger.info({ sourceGroup, branch }, 'Pull and deploy requested via IPC');
+
+      // Send "deploying" notification and write flag BEFORE execSync blocks the event loop.
+      // This ensures the user gets notified even if the agent didn't call send_message.
+      const deployJid = findJidForFolder(registeredGroups, sourceGroup);
+      if (deployJid) {
+        try { await deps.sendMessage(deployJid, '🚀 Deploying — back shortly!'); } catch { /* best-effort */ }
+      }
+      writeRestartFlag(sourceGroup);
+
       const { execSync: execSyncDeploy } = await import('child_process');
       const projectRoot = path.resolve(import.meta.dirname, '..');
 
