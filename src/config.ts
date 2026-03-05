@@ -11,6 +11,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'DISCORD_BOT_TOKEN',
   'DISCORD_ONLY',
+  'WEBHOOK_PORT',
+  'COMPOSIO_WEBHOOK_SECRET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -77,13 +79,11 @@ export const DISCORD_BOT_TOKEN =
 export const DISCORD_ONLY =
   (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';
 
-const webhookEnvConfig = readEnvFile(['WEBHOOK_PORT', 'COMPOSIO_WEBHOOK_SECRET']);
-
 export const WEBHOOK_PORT: number | null = (() => {
-  const raw = process.env['WEBHOOK_PORT'] ?? webhookEnvConfig['WEBHOOK_PORT'] ?? '';
+  const raw = process.env['WEBHOOK_PORT'] ?? envConfig['WEBHOOK_PORT'] ?? '';
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
 })();
 
 export const COMPOSIO_WEBHOOK_SECRET: string =
-  process.env['COMPOSIO_WEBHOOK_SECRET'] ?? webhookEnvConfig['COMPOSIO_WEBHOOK_SECRET'] ?? '';
+  process.env['COMPOSIO_WEBHOOK_SECRET'] ?? envConfig['COMPOSIO_WEBHOOK_SECRET'] ?? '';

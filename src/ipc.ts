@@ -722,7 +722,7 @@ export async function processTaskIpc(
         `Payload:\n${JSON.stringify(data.webhookPayload, null, 2)}`,
         ``,
         `Based on this event, decide what to do:`,
-        `- If it's noteworthy (e.g. a PR was merged, a build failed, something important happened), send Sanskar a concise notification using send_message.`,
+        `- If it's noteworthy (e.g. a PR was merged, a build failed, something important happened), send the user a concise notification using send_message.`,
         `- If it requires action (e.g. a PR merge means a deploy may be needed), take or offer to take that action.`,
         `- If it's noise (e.g. a synchronize event, a bot commit), stay silent — send nothing.`,
         `Use your judgment. You do not need to respond to every event.`,

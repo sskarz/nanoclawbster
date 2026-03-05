@@ -29,13 +29,17 @@ export function startWebhookServer(port: number, secret: string, onEvent: Webhoo
     if (req.method !== 'POST' || req.url !== '/webhook/composio') {
       res.writeHead(404); res.end('Not found'); return;
     }
+    const MAX_BODY = 1_048_576;
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let totalSize = 0;
+    req.on('data', (chunk: Buffer) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_BODY) { req.destroy(); res.writeHead(413); res.end('Payload too large'); return; }
+      chunks.push(chunk);
+    });
     req.on('end', () => {
+      if (totalSize > MAX_BODY) return; // already handled
       const body = Buffer.concat(chunks);
-      if (body.length > 1_048_576) {
-        res.writeHead(413); res.end('Payload too large'); return;
-      }
       const sigHeader = req.headers['x-composio-signature'] as string | undefined;
       if (!verifySignature(body, secret, sigHeader)) {
         logger.warn({ sigHeader }, 'Webhook signature verification failed');
