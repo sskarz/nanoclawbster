@@ -1,6 +1,12 @@
 /**
  * HTTP webhook receiver for Composio trigger events.
  * Uses only Node.js built-in http and crypto modules — no new dependencies.
+ *
+ * Composio webhook verification (from docs.composio.dev/docs/webhook-verification):
+ *   Headers: webhook-id, webhook-timestamp, webhook-signature
+ *   Signing string: "${webhook-id}.${webhook-timestamp}.${body}"
+ *   Secret: raw string (as-is from dashboard)
+ *   Signature header: "v1,<base64>" — strip prefix, compare base64 HMAC-SHA256
  */
 import crypto from 'crypto';
 import http from 'http';
@@ -8,20 +14,41 @@ import { logger } from './logger.js';
 
 export type WebhookEventHandler = (triggerName: string, data: unknown) => void;
 
-function verifySignature(body: Buffer, secret: string, header: string | undefined): boolean {
-  if (!header) return false;
-  const parts = header.split(',');
-  if (parts.length !== 2 || parts[0] !== 'v1') return false;
-  const received = parts[1];
-  const expected = crypto.createHmac('sha256', secret).update(body).digest('base64');
-  try {
-    const a = Buffer.from(received, 'base64');
-    const b = Buffer.from(expected, 'base64');
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
+const MAX_TIMESTAMP_AGE_S = 300; // 5 minutes
+
+function verifySignature(
+  body: string,
+  secret: string,
+  webhookId: string | undefined,
+  timestamp: string | undefined,
+  sigHeader: string | undefined,
+): boolean {
+  if (!webhookId || !timestamp || !sigHeader) return false;
+
+  // Validate timestamp freshness
+  const ts = parseInt(timestamp, 10);
+  if (isNaN(ts)) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - ts) > MAX_TIMESTAMP_AGE_S) return false;
+
+  const signingString = `${webhookId}.${timestamp}.${body}`;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(signingString)
+    .digest('base64');
+
+  // webhook-signature can have multiple space-delimited signatures
+  const signatures = sigHeader.split(' ');
+  for (const sig of signatures) {
+    const received = sig.includes(',') ? sig.split(',')[1] : sig;
+    if (!received) continue;
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received))) return true;
+    } catch {
+      continue;
+    }
   }
+  return false;
 }
 
 export function startWebhookServer(port: number, secret: string, onEvent: WebhookEventHandler): void {
@@ -40,24 +67,29 @@ export function startWebhookServer(port: number, secret: string, onEvent: Webhoo
     });
     req.on('end', () => {
       if (aborted) return;
-      const body = Buffer.concat(chunks);
-      const sigHeader = req.headers['x-composio-signature'] as string | undefined;
-      if (!verifySignature(body, secret, sigHeader)) {
-        logger.warn({ sigHeader }, 'Webhook signature verification failed');
+      const body = Buffer.concat(chunks).toString('utf-8');
+      const webhookId = req.headers['webhook-id'] as string | undefined;
+      const timestamp = req.headers['webhook-timestamp'] as string | undefined;
+      const sigHeader = req.headers['webhook-signature'] as string | undefined;
+      if (!verifySignature(body, secret, webhookId, timestamp, sigHeader)) {
+        logger.warn({ webhookId, timestamp, sigHeader: sigHeader?.slice(0, 30), bodyLen: body.length }, 'Webhook signature verification failed');
         res.writeHead(401); res.end('Unauthorized'); return;
       }
       let raw: unknown;
-      try { raw = JSON.parse(body.toString('utf-8')); }
+      try { raw = JSON.parse(body); }
       catch { res.writeHead(400); res.end('Bad request'); return; }
+      // Support V3 (metadata.trigger_slug) and V1 (trigger_name) payload formats
       const payload = raw as Record<string, unknown>;
       const metadata = payload['metadata'] as Record<string, unknown> | undefined;
-      const data = payload['data'];
-      const triggerName = metadata ? String(metadata['triggerName'] ?? '') : '';
+      const data = payload['data'] ?? payload['payload'];
+      const triggerName = metadata
+        ? String(metadata['trigger_slug'] ?? metadata['triggerName'] ?? '')
+        : String(payload['trigger_name'] ?? '');
       if (!triggerName) {
-        logger.warn({ raw }, 'Webhook missing metadata.triggerName');
+        logger.warn('Webhook missing trigger name in payload');
         res.writeHead(400); res.end('Bad request'); return;
       }
-      logger.info({ triggerName }, 'Composio webhook received');
+      logger.info({ triggerName, webhookId }, 'Composio webhook received');
       res.writeHead(200); res.end('OK');
       try { onEvent(triggerName, data); }
       catch (err) { logger.error({ err }, 'Webhook event handler threw'); }
