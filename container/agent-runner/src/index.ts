@@ -475,7 +475,10 @@ async function runQuery(
           composio: {
             command: 'node',
             args: [path.join(path.dirname(fileURLToPath(import.meta.url)), 'composio-mcp.js')],
-            env: { COMPOSIO_API_KEY: sdkEnv.COMPOSIO_API_KEY },
+            env: {
+              COMPOSIO_API_KEY: sdkEnv.COMPOSIO_API_KEY,
+              ...(sdkEnv.COMPOSIO_WEBHOOK_URL ? { COMPOSIO_WEBHOOK_URL: sdkEnv.COMPOSIO_WEBHOOK_URL } : {}),
+            },
           },
         } : {}),
       },

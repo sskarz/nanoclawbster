@@ -255,7 +255,9 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'COMPOSIO_API_KEY']);
+  // COMPOSIO_WEBHOOK_URL is not a secret but uses this path to reach the container.
+  // It is NOT in SECRET_ENV_VARS, so it won't be stripped from agent Bash commands.
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'COMPOSIO_API_KEY', 'COMPOSIO_WEBHOOK_URL']);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {

@@ -3,12 +3,16 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  COMPOSIO_WEBHOOK_SECRET,
+  DATA_DIR,
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  WEBHOOK_PORT,
 } from './config.js';
+import { startWebhookServer } from './webhook-server.js';
 import { DiscordChannel } from './channels/discord.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
@@ -475,6 +479,22 @@ async function sendRestartNotifications(): Promise<void> {
   }
 }
 
+function writeWebhookEventTask(triggerName: string, payload: unknown, adminGroup: RegisteredGroup, adminJid: string): void {
+  const tasksDir = path.join(DATA_DIR, 'ipc', adminGroup.folder, 'tasks');
+  try {
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const filename = `webhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    fs.writeFileSync(
+      path.join(tasksDir, filename),
+      JSON.stringify({ type: 'webhook_event', chatJid: adminJid, triggerName, webhookPayload: payload }),
+      'utf-8',
+    );
+    logger.info({ filename, triggerName, adminJid }, 'Webhook event IPC task written');
+  } catch (err) {
+    logger.error({ err }, 'Failed to write webhook event IPC task');
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -540,6 +560,21 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
+
+  // Start Composio webhook server for proactive event notifications
+  if (WEBHOOK_PORT && COMPOSIO_WEBHOOK_SECRET) {
+    startWebhookServer(WEBHOOK_PORT, COMPOSIO_WEBHOOK_SECRET, (triggerName, payload) => {
+      const adminEntry = Object.entries(registeredGroups).find(([, g]) => g.isAdmin === true);
+      if (!adminEntry) {
+        logger.warn('Webhook received but no admin group registered — cannot deliver notification');
+        return;
+      }
+      writeWebhookEventTask(triggerName, payload, adminEntry[1], adminEntry[0]);
+    });
+  } else {
+    logger.info('Webhook server not started (WEBHOOK_PORT or COMPOSIO_WEBHOOK_SECRET not configured)');
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   await sendRestartNotifications();
   recoverPendingMessages();

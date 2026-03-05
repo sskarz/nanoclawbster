@@ -209,6 +209,9 @@ export async function processTaskIpc(
     // For delegate_task
     task?: string;
     skill?: string;
+    // For webhook_event
+    triggerName?: string;
+    webhookPayload?: unknown;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isAdmin: boolean, // Verified from directory path
@@ -696,6 +699,48 @@ export async function processTaskIpc(
         { taskId: delegateTaskId, sourceGroup, skill: data.skill || 'none' },
         'Delegated task created',
       );
+      break;
+    }
+
+    case 'webhook_event': {
+      if (!isAdmin) {
+        logger.warn({ sourceGroup }, 'Unauthorized webhook_event attempt blocked');
+        break;
+      }
+      if (!data.chatJid || !data.triggerName || !data.webhookPayload) {
+        logger.warn({ data }, 'Invalid webhook_event — missing chatJid, triggerName, or webhookPayload');
+        break;
+      }
+      const webhookGroup = registeredGroups[data.chatJid];
+      if (!webhookGroup) {
+        logger.warn({ chatJid: data.chatJid }, 'webhook_event: group not registered');
+        break;
+      }
+      const webhookPrompt = [
+        `A webhook event was received from Composio.`,
+        `Trigger: ${data.triggerName}`,
+        `Payload:\n${JSON.stringify(data.webhookPayload, null, 2)}`,
+        ``,
+        `Based on this event, decide what to do:`,
+        `- If it's noteworthy (e.g. a PR was merged, a build failed, something important happened), send the user a concise notification using send_message.`,
+        `- If it requires action (e.g. a PR merge means a deploy may be needed), take or offer to take that action.`,
+        `- If it's noise (e.g. a synchronize event, a bot commit), stay silent — send nothing.`,
+        `Use your judgment. You do not need to respond to every event.`,
+      ].join('\n');
+      const webhookTaskId = `webhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      createTask({
+        id: webhookTaskId,
+        group_folder: webhookGroup.folder,
+        chat_jid: data.chatJid,
+        prompt: webhookPrompt,
+        schedule_type: 'once',
+        schedule_value: new Date().toISOString(),
+        context_mode: 'isolated',
+        next_run: new Date().toISOString(),
+        status: 'active',
+        created_at: new Date().toISOString(),
+      });
+      logger.info({ taskId: webhookTaskId, triggerName: data.triggerName }, 'Webhook event task created');
       break;
     }
 
