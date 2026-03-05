@@ -13,6 +13,7 @@ const envConfig = readEnvFile([
   'DISCORD_ONLY',
   'WEBHOOK_PORT',
   'COMPOSIO_WEBHOOK_SECRET',
+  'COMPOSIO_WEBHOOK_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -87,3 +88,6 @@ export const WEBHOOK_PORT: number | null = (() => {
 
 export const COMPOSIO_WEBHOOK_SECRET: string =
   process.env['COMPOSIO_WEBHOOK_SECRET'] ?? envConfig['COMPOSIO_WEBHOOK_SECRET'] ?? '';
+
+export const COMPOSIO_WEBHOOK_URL: string =
+  process.env['COMPOSIO_WEBHOOK_URL'] ?? envConfig['COMPOSIO_WEBHOOK_URL'] ?? '';
