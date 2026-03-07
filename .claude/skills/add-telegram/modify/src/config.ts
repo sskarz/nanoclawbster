@@ -9,8 +9,11 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'DISCORD_BOT_TOKEN',
   'TELEGRAM_BOT_TOKEN',
-  'TELEGRAM_ONLY',
+  'WEBHOOK_PORT',
+  'COMPOSIO_WEBHOOK_SECRET',
+  'COMPOSIO_WEBHOOK_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -67,12 +70,26 @@ export const TRIGGER_PATTERN = new RegExp(
 );
 
 // Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
+// Hardcoded to PST/PDT — users are in Los Angeles regardless of server location.
 export const TIMEZONE =
-  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  process.env.TZ || 'America/Los_Angeles';
+
+// Discord configuration
+export const DISCORD_BOT_TOKEN =
+  process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 
 // Telegram configuration
 export const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
-export const TELEGRAM_ONLY =
-  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
+export const WEBHOOK_PORT: number | null = (() => {
+  const raw = process.env['WEBHOOK_PORT'] ?? envConfig['WEBHOOK_PORT'] ?? '';
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+})();
+
+export const COMPOSIO_WEBHOOK_SECRET: string =
+  process.env['COMPOSIO_WEBHOOK_SECRET'] ?? envConfig['COMPOSIO_WEBHOOK_SECRET'] ?? '';
+
+export const COMPOSIO_WEBHOOK_URL: string =
+  process.env['COMPOSIO_WEBHOOK_URL'] ?? envConfig['COMPOSIO_WEBHOOK_URL'] ?? '';
