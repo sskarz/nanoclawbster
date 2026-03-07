@@ -3,22 +3,28 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  COMPOSIO_WEBHOOK_SECRET,
+  DATA_DIR,
+  DISCORD_BOT_TOKEN,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
+  WEBHOOK_PORT,
 } from './config.js';
+import { startWebhookServer } from './webhook-server.js';
+import { DiscordChannel } from './channels/discord.js';
 import { TelegramChannel } from './channels/telegram.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
+  writeStatsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  clearAdminGroupFlag,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -26,6 +32,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getStats,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -50,7 +57,6 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -91,6 +97,9 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     return;
   }
 
+  if (group.isAdmin) {
+    clearAdminGroupFlag();
+  }
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
@@ -147,8 +156,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isAdminGroup && group.requiresTrigger !== false) {
+  // Check trigger requirement:
+  // - Non-admin groups require a trigger by default (unless requiresTrigger is explicitly false)
+  // - Admin group also checks trigger if requiresTrigger is explicitly set to true
+  const needsTrigger = group.requiresTrigger === true ||
+    (!isAdminGroup && group.requiresTrigger !== false);
+  if (needsTrigger) {
     const hasTrigger = missedMessages.some((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
@@ -253,7 +266,10 @@ async function runAgent(
     })),
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Write stats snapshot for the container to read
+  writeStatsSnapshot(group.folder, getStats());
+
+  // Update available groups snapshot (admin group only can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
@@ -351,9 +367,10 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isAdminGroup = group.isAdmin === true;
-          const needsTrigger = !isAdminGroup && group.requiresTrigger !== false;
+          const needsTrigger = group.requiresTrigger === true ||
+            (!isAdminGroup && group.requiresTrigger !== false);
 
-          // For non-main groups, only act on trigger messages.
+          // Only act on trigger messages when required.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
@@ -391,6 +408,7 @@ async function startMessageLoop(): Promise<void> {
             queue.enqueueMessageCheck(chatJid);
           }
         }
+
       }
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
@@ -415,11 +433,65 @@ function recoverPendingMessages(): void {
       queue.enqueueMessageCheck(chatJid);
     }
   }
+
 }
 
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
+}
+
+/**
+ * Check all registered groups for a restarting.flag file and send
+ * "Back online!" if the flag is recent. Runs once at startup so the
+ * notification fires without waiting for a user message.
+ */
+async function sendRestartNotifications(): Promise<void> {
+  const FIVE_MINUTES = 5 * 60 * 1000;
+
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    const flagPath = path.join(resolveGroupFolderPath(group.folder), 'restarting.flag');
+    try {
+      if (!fs.existsSync(flagPath)) continue;
+
+      const flagData = JSON.parse(fs.readFileSync(flagPath, 'utf-8'));
+      const flagAge = Date.now() - new Date(flagData.timestamp).getTime();
+
+      if (flagAge < FIVE_MINUTES) {
+        const channel = findChannel(channels, jid);
+        if (channel) {
+          logger.info({ group: group.name }, 'Restart flag detected — sending back-online notification');
+          await channel.sendMessage(jid, '✅ Back online!');
+        } else {
+          logger.warn({ jid }, 'Restart flag found but no channel for JID');
+        }
+      } else {
+        logger.info({ group: group.name, ageSeconds: Math.round(flagAge / 1000) }, 'Restart flag is stale, removing');
+      }
+
+      fs.unlinkSync(flagPath);
+    } catch (err) {
+      logger.warn({ group: group.name, err }, 'Restart flag check failed');
+      // Clean up flag even on error
+      try { fs.unlinkSync(flagPath); } catch { /* ignore */ }
+    }
+  }
+}
+
+function writeWebhookEventTask(triggerName: string, payload: unknown, adminGroup: RegisteredGroup, adminJid: string): void {
+  const tasksDir = path.join(DATA_DIR, 'ipc', adminGroup.folder, 'tasks');
+  try {
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const filename = `webhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    fs.writeFileSync(
+      path.join(tasksDir, filename),
+      JSON.stringify({ type: 'webhook_event', chatJid: adminJid, triggerName, webhookPayload: payload }),
+      'utf-8',
+    );
+    logger.info({ filename, triggerName, adminJid }, 'Webhook event IPC task written');
+  } catch (err) {
+    logger.error({ err }, 'Failed to write webhook event IPC task');
+  }
 }
 
 async function main(): Promise<void> {
@@ -447,16 +519,16 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
+  if (DISCORD_BOT_TOKEN) {
+    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
+    channels.push(discord);
+    await discord.connect();
+  }
+
   if (TELEGRAM_BOT_TOKEN) {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
     await telegram.connect();
-  }
-
-  if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
   }
 
   // Start subsystems (independently of connection handler)
@@ -476,18 +548,34 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, files) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, files);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: () => Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
+
+  // Start Composio webhook server for proactive event notifications
+  if (WEBHOOK_PORT && COMPOSIO_WEBHOOK_SECRET) {
+    startWebhookServer(WEBHOOK_PORT, COMPOSIO_WEBHOOK_SECRET, (triggerName, payload) => {
+      const adminEntry = Object.entries(registeredGroups).find(([, g]) => g.isAdmin === true);
+      if (!adminEntry) {
+        logger.warn('Webhook received but no admin group registered — cannot deliver notification');
+        return;
+      }
+      writeWebhookEventTask(triggerName, payload, adminEntry[1], adminEntry[0]);
+    });
+  } else {
+    logger.info('Webhook server not started (WEBHOOK_PORT or COMPOSIO_WEBHOOK_SECRET not configured)');
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
+  await sendRestartNotifications();
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
