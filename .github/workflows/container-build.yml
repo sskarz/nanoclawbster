@@ -1,0 +1,13 @@
+name: Container Build
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build agent container image
+        run: docker build -t nanoclawbster-agent:ci ./container
