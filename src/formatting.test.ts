@@ -62,9 +62,25 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
       '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+        '<message sender="Alice" sender_id="123@s.whatsapp.net" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
+  });
+
+  it('includes sender_id when sender differs from sender_name (e.g. Discord user ID)', () => {
+    const result = formatMessages([
+      makeMsg({ sender: '288881039760293888', sender_name: 'sans' }),
+    ]);
+    expect(result).toContain('sender="sans"');
+    expect(result).toContain('sender_id="288881039760293888"');
+  });
+
+  it('omits sender_id when sender equals sender_name', () => {
+    const result = formatMessages([
+      makeMsg({ sender: 'Alice', sender_name: 'Alice' }),
+    ]);
+    expect(result).toContain('sender="Alice"');
+    expect(result).not.toContain('sender_id');
   });
 
   it('formats multiple messages', () => {
