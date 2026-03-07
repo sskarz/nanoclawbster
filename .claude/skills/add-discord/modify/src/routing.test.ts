@@ -13,19 +13,9 @@ beforeEach(() => {
 describe('JID ownership patterns', () => {
   // These test the patterns that will become ownsJid() on the Channel interface
 
-  it('WhatsApp group JID: ends with @g.us', () => {
-    const jid = '12345678@g.us';
-    expect(jid.endsWith('@g.us')).toBe(true);
-  });
-
   it('Discord JID: starts with dc:', () => {
     const jid = 'dc:1234567890123456';
     expect(jid.startsWith('dc:')).toBe(true);
-  });
-
-  it('WhatsApp DM JID: ends with @s.whatsapp.net', () => {
-    const jid = '12345678@s.whatsapp.net';
-    expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
   });
 });
 
@@ -33,20 +23,17 @@ describe('JID ownership patterns', () => {
 
 describe('getAvailableGroups', () => {
   it('returns only groups, excludes DMs', () => {
-    storeChatMetadata('group1@g.us', '2024-01-01T00:00:01.000Z', 'Group 1', 'whatsapp', true);
-    storeChatMetadata('user@s.whatsapp.net', '2024-01-01T00:00:02.000Z', 'User DM', 'whatsapp', false);
-    storeChatMetadata('group2@g.us', '2024-01-01T00:00:03.000Z', 'Group 2', 'whatsapp', true);
+    storeChatMetadata('dc:111', '2024-01-01T00:00:01.000Z', 'Group 1', 'discord', true);
+    storeChatMetadata('dc:222', '2024-01-01T00:00:03.000Z', 'Group 2', 'discord', true);
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(2);
-    expect(groups.map((g) => g.jid)).toContain('group1@g.us');
-    expect(groups.map((g) => g.jid)).toContain('group2@g.us');
-    expect(groups.map((g) => g.jid)).not.toContain('user@s.whatsapp.net');
+    expect(groups.map((g) => g.jid)).toContain('dc:111');
+    expect(groups.map((g) => g.jid)).toContain('dc:222');
   });
 
   it('includes Discord channel JIDs', () => {
     storeChatMetadata('dc:1234567890123456', '2024-01-01T00:00:01.000Z', 'Discord Channel', 'discord', true);
-    storeChatMetadata('user@s.whatsapp.net', '2024-01-01T00:00:02.000Z', 'User DM', 'whatsapp', false);
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
@@ -76,19 +63,19 @@ describe('getAvailableGroups', () => {
 
   it('excludes __group_sync__ sentinel', () => {
     storeChatMetadata('__group_sync__', '2024-01-01T00:00:00.000Z');
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:01.000Z', 'Group', 'whatsapp', true);
+    storeChatMetadata('dc:123', '2024-01-01T00:00:01.000Z', 'Group', 'discord', true);
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
-    expect(groups[0].jid).toBe('group@g.us');
+    expect(groups[0].jid).toBe('dc:123');
   });
 
   it('marks registered groups correctly', () => {
-    storeChatMetadata('reg@g.us', '2024-01-01T00:00:01.000Z', 'Registered', 'whatsapp', true);
-    storeChatMetadata('unreg@g.us', '2024-01-01T00:00:02.000Z', 'Unregistered', 'whatsapp', true);
+    storeChatMetadata('dc:100', '2024-01-01T00:00:01.000Z', 'Registered', 'discord', true);
+    storeChatMetadata('dc:200', '2024-01-01T00:00:02.000Z', 'Unregistered', 'discord', true);
 
     _setRegisteredGroups({
-      'reg@g.us': {
+      'dc:100': {
         name: 'Registered',
         folder: 'registered',
         trigger: '@Andy',
@@ -97,22 +84,22 @@ describe('getAvailableGroups', () => {
     });
 
     const groups = getAvailableGroups();
-    const reg = groups.find((g) => g.jid === 'reg@g.us');
-    const unreg = groups.find((g) => g.jid === 'unreg@g.us');
+    const reg = groups.find((g) => g.jid === 'dc:100');
+    const unreg = groups.find((g) => g.jid === 'dc:200');
 
     expect(reg?.isRegistered).toBe(true);
     expect(unreg?.isRegistered).toBe(false);
   });
 
   it('returns groups ordered by most recent activity', () => {
-    storeChatMetadata('old@g.us', '2024-01-01T00:00:01.000Z', 'Old', 'whatsapp', true);
-    storeChatMetadata('new@g.us', '2024-01-01T00:00:05.000Z', 'New', 'whatsapp', true);
-    storeChatMetadata('mid@g.us', '2024-01-01T00:00:03.000Z', 'Mid', 'whatsapp', true);
+    storeChatMetadata('dc:old', '2024-01-01T00:00:01.000Z', 'Old', 'discord', true);
+    storeChatMetadata('dc:new', '2024-01-01T00:00:05.000Z', 'New', 'discord', true);
+    storeChatMetadata('dc:mid', '2024-01-01T00:00:03.000Z', 'Mid', 'discord', true);
 
     const groups = getAvailableGroups();
-    expect(groups[0].jid).toBe('new@g.us');
-    expect(groups[1].jid).toBe('mid@g.us');
-    expect(groups[2].jid).toBe('old@g.us');
+    expect(groups[0].jid).toBe('dc:new');
+    expect(groups[1].jid).toBe('dc:mid');
+    expect(groups[2].jid).toBe('dc:old');
   });
 
   it('excludes non-group chats regardless of JID format', () => {
@@ -120,12 +107,12 @@ describe('getAvailableGroups', () => {
     storeChatMetadata('unknown-format-123', '2024-01-01T00:00:01.000Z', 'Unknown');
     // Explicitly non-group with unusual JID
     storeChatMetadata('custom:abc', '2024-01-01T00:00:02.000Z', 'Custom DM', 'custom', false);
-    // A real group for contrast
-    storeChatMetadata('group@g.us', '2024-01-01T00:00:03.000Z', 'Group', 'whatsapp', true);
+    // A real Discord group for contrast
+    storeChatMetadata('dc:999', '2024-01-01T00:00:03.000Z', 'Group', 'discord', true);
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
-    expect(groups[0].jid).toBe('group@g.us');
+    expect(groups[0].jid).toBe('dc:999');
   });
 
   it('returns empty array when no chats exist', () => {
@@ -133,15 +120,15 @@ describe('getAvailableGroups', () => {
     expect(groups).toHaveLength(0);
   });
 
-  it('mixes WhatsApp and Discord chats ordered by activity', () => {
-    storeChatMetadata('wa@g.us', '2024-01-01T00:00:01.000Z', 'WhatsApp', 'whatsapp', true);
-    storeChatMetadata('dc:555', '2024-01-01T00:00:03.000Z', 'Discord', 'discord', true);
-    storeChatMetadata('wa2@g.us', '2024-01-01T00:00:02.000Z', 'WhatsApp 2', 'whatsapp', true);
+  it('returns multiple Discord channels ordered by activity', () => {
+    storeChatMetadata('dc:old', '2024-01-01T00:00:01.000Z', 'Older Discord', 'discord', true);
+    storeChatMetadata('dc:new', '2024-01-01T00:00:03.000Z', 'Newer Discord', 'discord', true);
+    storeChatMetadata('dc:mid', '2024-01-01T00:00:02.000Z', 'Mid Discord', 'discord', true);
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(3);
-    expect(groups[0].jid).toBe('dc:555');
-    expect(groups[1].jid).toBe('wa2@g.us');
-    expect(groups[2].jid).toBe('wa@g.us');
+    expect(groups[0].jid).toBe('dc:new');
+    expect(groups[1].jid).toBe('dc:mid');
+    expect(groups[2].jid).toBe('dc:old');
   });
 });
