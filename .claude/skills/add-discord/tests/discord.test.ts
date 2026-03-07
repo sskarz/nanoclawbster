@@ -43,13 +43,11 @@ describe('discord skill package', () => {
     const indexContent = fs.readFileSync(indexFile, 'utf-8');
     expect(indexContent).toContain('DiscordChannel');
     expect(indexContent).toContain('DISCORD_BOT_TOKEN');
-    expect(indexContent).toContain('DISCORD_ONLY');
     expect(indexContent).toContain('findChannel');
-    expect(indexContent).toContain('channels: Channel[]');
+    expect(indexContent).toContain('const channels: Channel[] = []');
 
     const configContent = fs.readFileSync(configFile, 'utf-8');
     expect(configContent).toContain('DISCORD_BOT_TOKEN');
-    expect(configContent).toContain('DISCORD_ONLY');
   });
 
   it('has intent files for modified files', () => {
@@ -88,13 +86,11 @@ describe('discord skill package', () => {
       'utf-8',
     );
 
-    // Multi-channel architecture
+    // Discord-first architecture: channels array, Discord channel creation
     expect(content).toContain('const channels: Channel[] = []');
-    expect(content).toContain('channels.push(whatsapp)');
-    expect(content).toContain('channels.push(discord)');
+    expect(content).toContain('DiscordChannel');
 
-    // Conditional channel creation
-    expect(content).toContain('if (!DISCORD_ONLY)');
+    // Conditional Discord creation (only if token configured)
     expect(content).toContain('if (DISCORD_BOT_TOKEN)');
 
     // Shutdown disconnects all channels
@@ -115,9 +111,8 @@ describe('discord skill package', () => {
     expect(content).toContain('export const DATA_DIR');
     expect(content).toContain('export const TIMEZONE');
 
-    // Discord exports added
+    // Discord exports present
     expect(content).toContain('export const DISCORD_BOT_TOKEN');
-    expect(content).toContain('export const DISCORD_ONLY');
   });
 
   it('modified routing.test.ts includes Discord JID tests', () => {
