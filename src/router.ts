@@ -10,9 +10,14 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+  const lines = messages.map((m) => {
+    // Include sender_id so the agent can distinguish users with the same
+    // display name (e.g. two Discord users both named "sans").
+    const senderAttr = m.sender && m.sender !== m.sender_name
+      ? `sender="${escapeXml(m.sender_name)}" sender_id="${escapeXml(m.sender)}"`
+      : `sender="${escapeXml(m.sender_name)}"`;
+    return `<message ${senderAttr} time="${m.timestamp}">${escapeXml(m.content)}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
