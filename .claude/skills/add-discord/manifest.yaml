@@ -14,6 +14,7 @@ structured:
     discord.js: "^14.18.0"
   env_additions:
     - DISCORD_BOT_TOKEN
+
 conflicts: []
 depends: []
 test: "npx vitest run src/channels/discord.test.ts"
