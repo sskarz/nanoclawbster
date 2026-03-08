@@ -49,6 +49,46 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+/** Tracks pending ask_user questions waiting for a reply from the user. */
+interface PendingQuestion {
+  requestId: string;
+  chatJid: string;
+  groupFolder: string;
+}
+
+/** Map from chatJid → pending question (at most one per chat at a time). */
+const pendingQuestions = new Map<string, PendingQuestion>();
+
+/**
+ * If a pending question exists for this chatJid, write the user's reply as
+ * a response file so the container's ask_user tool can unblock.
+ * Returns true if the reply was consumed by a pending question.
+ */
+export function tryAnswerPendingQuestion(chatJid: string, answer: string): boolean {
+  const pending = pendingQuestions.get(chatJid);
+  if (!pending) return false;
+
+  pendingQuestions.delete(chatJid);
+
+  const responsesDir = path.join(DATA_DIR, 'ipc', pending.groupFolder, 'responses');
+  const responseFile = path.join(responsesDir, `${pending.requestId}.json`);
+  try {
+    fs.mkdirSync(responsesDir, { recursive: true });
+    const tempPath = `${responseFile}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({ answer, timestamp: new Date().toISOString() }));
+    fs.renameSync(tempPath, responseFile);
+    // chown so container node user (1000) can read it
+    if (process.getuid?.() === 0) {
+      try { fs.chownSync(responseFile, 1000, 1000); } catch { /* best-effort */ }
+    }
+    logger.info({ chatJid, requestId: pending.requestId }, 'ask_user reply written');
+    return true;
+  } catch (err) {
+    logger.error({ err, chatJid, requestId: pending.requestId }, 'Failed to write ask_user response');
+    return false;
+  }
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -90,7 +130,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if ((data.type === 'message' || data.type === 'question') && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
@@ -108,9 +148,23 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   if (!text && (!resolvedFiles.length)) break; // nothing left after stripping <internal> tags
                   await deps.sendMessage(data.chatJid, text, resolvedFiles.length ? resolvedFiles : undefined);
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup, attachments: resolvedFiles.length },
+                    { chatJid: data.chatJid, sourceGroup, attachments: resolvedFiles.length, msgType: data.type },
                     'IPC message sent',
                   );
+
+                  // If this is a question, register it as pending so the next user
+                  // reply in this chat gets routed back to the container.
+                  if (data.type === 'question' && data.requestId) {
+                    pendingQuestions.set(data.chatJid, {
+                      requestId: data.requestId,
+                      chatJid: data.chatJid,
+                      groupFolder: sourceGroup,
+                    });
+                    logger.info(
+                      { chatJid: data.chatJid, requestId: data.requestId },
+                      'Pending question registered',
+                    );
+                  }
 
                   // Clean up attachment files after send
                   for (const p of resolvedFiles) {
@@ -457,7 +511,7 @@ export async function processTaskIpc(
       // Send "restarting" notification and write flag BEFORE execSync blocks the event loop
       const restartJid = findJidForFolder(registeredGroups, sourceGroup);
       if (restartJid) {
-        try { await deps.sendMessage(restartJid, '🔄 Restarting — back shortly!'); } catch { /* best-effort */ }
+        try { await deps.sendMessage(restartJid, '\uD83D\uDD04 Restarting — back shortly!'); } catch { /* best-effort */ }
       }
       writeRestartFlag(sourceGroup);
 
@@ -529,7 +583,7 @@ export async function processTaskIpc(
       // This ensures the user gets notified even if the agent didn't call send_message.
       const deployJid = findJidForFolder(registeredGroups, sourceGroup);
       if (deployJid) {
-        try { await deps.sendMessage(deployJid, '🚀 Deploying — back shortly!'); } catch { /* best-effort */ }
+        try { await deps.sendMessage(deployJid, '\uD83D\uDE80 Deploying — back shortly!'); } catch { /* best-effort */ }
       }
       writeRestartFlag(sourceGroup);
 

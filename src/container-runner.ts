@@ -194,6 +194,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'attachments'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'received'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'responses'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',

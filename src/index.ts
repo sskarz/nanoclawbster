@@ -40,7 +40,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
+import { startIpcWatcher, tryAnswerPendingQuestion } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -361,6 +361,21 @@ async function startMessageLoop(): Promise<void> {
           const channel = findChannel(channels, chatJid);
           if (!channel) {
             console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+            continue;
+          }
+
+          // Check if there's a pending ask_user question for this chat.
+          // If so, the latest user message is the answer — route it to the
+          // waiting container and skip the normal agent flow.
+          const latestUserMessage = groupMessages
+            .filter(m => !m.is_from_me && !m.is_bot_message)
+            .at(-1);
+          if (latestUserMessage && tryAnswerPendingQuestion(chatJid, latestUserMessage.content)) {
+            logger.info({ chatJid }, 'User reply routed to pending ask_user question');
+            // Advance the agent cursor so these messages aren't re-processed
+            // when the container (still running) finishes answering the question.
+            lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+            saveState();
             continue;
           }
 
