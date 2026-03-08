@@ -469,6 +469,11 @@ async function runQuery(
             NANOCLAWBSTER_CHAT_JID: containerInput.chatJid,
             NANOCLAWBSTER_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAWBSTER_IS_ADMIN: containerInput.isAdmin ? '1' : '0',
+            // Pass Retell credentials so make_phone_call MCP tool can use them
+            ...(sdkEnv.RETELL_API_KEY ? { RETELL_API_KEY: sdkEnv.RETELL_API_KEY } : {}),
+            ...(sdkEnv.RETELL_AGENT_ID ? { RETELL_AGENT_ID: sdkEnv.RETELL_AGENT_ID } : {}),
+            ...(sdkEnv.RETELL_FROM_NUMBER ? { RETELL_FROM_NUMBER: sdkEnv.RETELL_FROM_NUMBER } : {}),
+            ...(sdkEnv.RETELL_WEBHOOK_URL ? { RETELL_WEBHOOK_URL: sdkEnv.RETELL_WEBHOOK_URL } : {}),
           },
         },
         ...(containerInput.isAdmin && sdkEnv.COMPOSIO_API_KEY ? {
@@ -568,7 +573,7 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // Query loop: run query -> wait for IPC message -> run new query -> repeat
   let resumeAt: string | undefined;
   try {
     while (true) {

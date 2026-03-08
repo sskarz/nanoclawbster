@@ -12,6 +12,7 @@ import {
   WEBHOOK_PORT,
 } from './config.js';
 import { startWebhookServer } from './webhook-server.js';
+import { attachRetellWebSocketServer } from './retell-ws.js';
 import { DiscordChannel } from './channels/discord.js';
 import {
   ContainerOutput,
@@ -584,8 +585,9 @@ async function main(): Promise<void> {
   });
 
   // Start Composio webhook server for proactive event notifications
+  // Also attach the Retell AI WebSocket LLM server to the same HTTP server.
   if (WEBHOOK_PORT && COMPOSIO_WEBHOOK_SECRET) {
-    startWebhookServer(WEBHOOK_PORT, COMPOSIO_WEBHOOK_SECRET, (triggerName, payload) => {
+    const webhookServer = startWebhookServer(WEBHOOK_PORT, COMPOSIO_WEBHOOK_SECRET, (triggerName, payload) => {
       const adminEntry = Object.entries(registeredGroups).find(([, g]) => g.isAdmin === true);
       if (!adminEntry) {
         logger.warn('Webhook received but no admin group registered — cannot deliver notification');
@@ -593,8 +595,20 @@ async function main(): Promise<void> {
       }
       writeWebhookEventTask(triggerName, payload, adminEntry[1], adminEntry[0]);
     });
+    // Attach Retell WebSocket LLM server to handle phone calls
+    attachRetellWebSocketServer(webhookServer);
+  } else if (WEBHOOK_PORT) {
+    // No Composio secret, but we can still run a minimal HTTP server for Retell
+    const http = await import('http');
+    const minimalServer = http.createServer((req, res) => {
+      res.writeHead(200); res.end('NanoClawbster webhook server');
+    });
+    minimalServer.listen(WEBHOOK_PORT, () =>
+      logger.info({ port: WEBHOOK_PORT }, 'Minimal HTTP server started for Retell WebSocket'),
+    );
+    attachRetellWebSocketServer(minimalServer);
   } else {
-    logger.info('Webhook server not started (WEBHOOK_PORT or COMPOSIO_WEBHOOK_SECRET not configured)');
+    logger.info('Webhook server not started (WEBHOOK_PORT not configured); Retell calls unavailable');
   }
 
   queue.setProcessMessagesFn(processGroupMessages);

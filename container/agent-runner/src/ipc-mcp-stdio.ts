@@ -9,6 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
 import { CronExpressionParser } from 'cron-parser';
 
 const IPC_DIR = '/workspace/ipc';
@@ -486,6 +487,188 @@ It may take 2-5 minutes. The file contains {success, error?, duration_ms, timest
 );
 
 } // end main-only tools
+
+// ---------------------------------------------------------------------------
+// make_phone_call — available to all groups
+// ---------------------------------------------------------------------------
+
+/**
+ * Make a raw HTTPS POST request and return the response body as a string.
+ */
+function httpsPost(options: https.RequestOptions, body: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        resolve({
+          status: res.statusCode ?? 0,
+          body: Buffer.concat(chunks).toString('utf-8'),
+        });
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+server.registerTool(
+  'make_phone_call',
+  {
+    description: `Make an outbound phone call to Sanskar (+16268337629) using Retell AI + Claude as the voice agent.
+
+The call agent (Nano) will handle the conversation using the provided purpose as context.
+Max call duration is 60 seconds. Requires RETELL_API_KEY and RETELL_AGENT_ID to be configured.
+
+Use this when you need to reach Sanskar by phone — e.g. to give him a verbal update, reminder, or alert.`,
+    inputSchema: {
+      purpose: z.string().describe('What the call is about — this becomes the context/system prompt for the call agent so it knows why it\'s calling'),
+      message: z.string().optional().describe('Optional specific opening message or talking points for the call agent'),
+    },
+  },
+  async (args: { purpose: string; message?: string }) => {
+    // Read Retell credentials from environment
+    const retellApiKey = process.env.RETELL_API_KEY ?? '';
+    const retellAgentId = process.env.RETELL_AGENT_ID ?? '';
+    const retellFromNumber = process.env.RETELL_FROM_NUMBER ?? '';
+    const retellWebhookUrl = process.env.RETELL_WEBHOOK_URL ?? '';
+
+    if (!retellApiKey) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: '\u274C RETELL_API_KEY is not configured. Please add it to your .env file and restart. Get a key from https://retellai.com',
+        }],
+        isError: true,
+      };
+    }
+
+    if (!retellFromNumber) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: '\u274C RETELL_FROM_NUMBER is not configured. Add your Retell phone number (e.g. +14157774444) to .env.',
+        }],
+        isError: true,
+      };
+    }
+
+    // Build call purpose context for the LLM server
+    const purposeText = args.message
+      ? `${args.purpose}. Opening message: ${args.message}`
+      : args.purpose;
+
+    // Encode purpose for URL query param (used by the WebSocket LLM server)
+    const encodedPurpose = encodeURIComponent(purposeText);
+
+    // Build the request body — use agent_id if configured, otherwise use llm_websocket_url override
+    // Retell v2 create-phone-call API
+    const toNumber = '+16268337629'; // Sanskar's number
+
+    type CallRequestBody = {
+      from_number: string;
+      to_number: string;
+      override_agent_id?: string;
+      agent_override?: {
+        llm_websocket_url?: string;
+        max_call_duration_ms: number;
+        begin_message?: string;
+      };
+      metadata?: Record<string, string>;
+    };
+
+    const requestBody: CallRequestBody = {
+      from_number: retellFromNumber,
+      to_number: toNumber,
+      metadata: {
+        purpose: purposeText.slice(0, 200),
+      },
+    };
+
+    if (retellAgentId) {
+      // Use a pre-configured agent — attach purpose via metadata and webhook URL
+      requestBody.override_agent_id = retellAgentId;
+      requestBody.agent_override = {
+        max_call_duration_ms: 60000, // 60 second hard limit
+        ...(retellWebhookUrl ? { llm_websocket_url: `${retellWebhookUrl}/llm-websocket/${Date.now()}?purpose=${encodedPurpose}` } : {}),
+        ...(args.message ? { begin_message: args.message } : {}),
+      };
+    } else if (retellWebhookUrl) {
+      // No agent ID — require it
+      return {
+        content: [{
+          type: 'text' as const,
+          text: '\u274C RETELL_AGENT_ID is not configured. You need to create an agent in the Retell dashboard first.\n\nSetup steps:\n1. Go to https://retellai.com and create an account\n2. Create an agent with your WebSocket URL: ' + retellWebhookUrl + '/llm-websocket\n3. Copy the agent_id and add RETELL_AGENT_ID=<id> to your .env',
+        }],
+        isError: true,
+      };
+    } else {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: '\u274C RETELL_AGENT_ID and RETELL_WEBHOOK_URL are not configured. See .env.example for setup instructions.',
+        }],
+        isError: true,
+      };
+    }
+
+    const bodyString = JSON.stringify(requestBody);
+
+    try {
+      const response = await httpsPost(
+        {
+          hostname: 'api.retellai.com',
+          path: '/v2/create-phone-call',
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${retellApiKey}`,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(bodyString),
+          },
+        },
+        bodyString,
+      );
+
+      if (response.status === 201 || response.status === 200) {
+        let callId = 'unknown';
+        try {
+          const parsed = JSON.parse(response.body) as { call_id?: string; call_status?: string };
+          callId = parsed.call_id ?? callId;
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `\uD83D\uDCDE Call initiated!\n\nCall ID: ${callId}\nStatus: ${parsed.call_status ?? 'registered'}\nTo: ${toNumber}\nMax duration: 60 seconds\nPurpose: ${args.purpose}`,
+            }],
+          };
+        } catch {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `\uD83D\uDCDE Call initiated (call_id unknown — raw response: ${response.body.slice(0, 200)})`,
+            }],
+          };
+        }
+      } else {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `\u274C Retell API error (HTTP ${response.status}): ${response.body.slice(0, 500)}`,
+          }],
+          isError: true,
+        };
+      }
+    } catch (err) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `\u274C Network error calling Retell API: ${err instanceof Error ? err.message : String(err)}`,
+        }],
+        isError: true,
+      };
+    }
+  },
+);
 
 // Start the stdio transport
 const transport = new StdioServerTransport();
