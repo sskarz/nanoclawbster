@@ -15,6 +15,10 @@ const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const ATTACHMENTS_DIR = path.join(IPC_DIR, 'attachments');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
+
+const ASK_USER_POLL_MS = 500;
+const ASK_USER_DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAWBSTER_CHAT_JID!;
@@ -70,29 +74,78 @@ server.registerTool(
 );
 
 server.registerTool(
+  'ask_user',
+  {
+    description: "Ask the user a question and wait for their response. The question will be sent to them as a Discord message and execution will pause until they reply. Use this when you need clarification or a decision before continuing. Has a 5-minute timeout by default.",
+    inputSchema: {
+      question: z.string().describe('The question to ask the user'),
+      timeout_ms: z.number().optional().describe('How long to wait for a response in milliseconds (default: 300000 = 5 minutes)'),
+    },
+  },
+  async (args: { question: string; timeout_ms?: number }) => {
+    const requestId = `ask-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timeout = args.timeout_ms ?? ASK_USER_DEFAULT_TIMEOUT_MS;
+    const responseFile = path.join(RESPONSES_DIR, `${requestId}.json`);
+
+    // Write question to messages dir so host sends it to Discord
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'question',
+      chatJid,
+      groupFolder,
+      requestId,
+      text: `\u2753 ${args.question}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response file
+    const startTime = Date.now();
+    while (true) {
+      if (fs.existsSync(responseFile)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
+          fs.unlinkSync(responseFile);
+          return { content: [{ type: 'text' as const, text: data.answer }] };
+        } catch {
+          // If file is being written (partial read), retry on next poll
+        }
+      }
+
+      if (Date.now() - startTime > timeout) {
+        return {
+          content: [{ type: 'text' as const, text: `[No response received after ${Math.round(timeout / 1000)}s — proceeding without user input]` }],
+          isError: true,
+        };
+      }
+
+      await new Promise(r => setTimeout(r, ASK_USER_POLL_MS));
+    }
+  },
+);
+
+server.registerTool(
   'schedule_task',
   {
     description: `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
 CONTEXT MODE - Choose based on task type:
-• "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
-• "isolated": Task runs in a fresh session with no conversation history. Use for independent tasks that don't need prior context. When using isolated mode, include all necessary context in the prompt itself.
+\u2022 "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
+\u2022 "isolated": Task runs in a fresh session with no conversation history. Use for independent tasks that don't need prior context. When using isolated mode, include all necessary context in the prompt itself.
 
 If unsure which mode to use, you can ask the user. Examples:
-- "Remind me about our discussion" → group (needs conversation context)
-- "Check the weather every morning" → isolated (self-contained task)
-- "Follow up on my request" → group (needs to know what was requested)
-- "Generate a daily report" → isolated (just needs instructions in prompt)
+- "Remind me about our discussion" \u2192 group (needs conversation context)
+- "Check the weather every morning" \u2192 isolated (self-contained task)
+- "Follow up on my request" \u2192 group (needs to know what was requested)
+- "Generate a daily report" \u2192 isolated (just needs instructions in prompt)
 
 MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It can also use send_message for immediate delivery, or wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
-• Always send a message (e.g., reminders, daily briefings)
-• Only send a message when there's something to report (e.g., "notify me if...")
-• Never send a message (background maintenance tasks)
+\u2022 Always send a message (e.g., reminders, daily briefings)
+\u2022 Only send a message when there's something to report (e.g., "notify me if...")
+\u2022 Never send a message (background maintenance tasks)
 
-SCHEDULE VALUE FORMAT (all times are PST/PDT — America/Los_Angeles):
-• cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am PST)
-• interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
-• once: PST/PDT time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
+SCHEDULE VALUE FORMAT (all times are PST/PDT \u2014 America/Los_Angeles):
+\u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am PST)
+\u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
+\u2022 once: PST/PDT time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
     inputSchema: {
       prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
       schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
@@ -123,7 +176,7 @@ SCHEDULE VALUE FORMAT (all times are PST/PDT — America/Los_Angeles):
     } else if (args.schedule_type === 'once') {
       if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be PST/PDT time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Timestamp must be PST/PDT time without timezone suffix. Got "${args.schedule_value}" \u2014 use format like "2026-02-01T15:30:00".` }],
           isError: true,
         };
       }
@@ -268,7 +321,7 @@ server.registerTool(
   {
     description: `Delegate a task to a dedicated coding agent with clean context (no conversation history). The coding agent runs in a separate container with only the task prompt and skill instructions. It reports progress via send_message. This tool returns immediately.`,
     inputSchema: {
-      task: z.string().describe('Detailed description of what the coding agent should do. Include ALL necessary context — the agent has NO conversation history.'),
+      task: z.string().describe('Detailed description of what the coding agent should do. Include ALL necessary context \u2014 the agent has NO conversation history.'),
       skill: z.string().optional().describe('Skill name to load (e.g. "self-improve"). Instructions will be prepended to the prompt.'),
     },
   },
@@ -352,7 +405,7 @@ server.registerTool(
 server.registerTool(
   'restart_self',
   {
-    description: 'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. The host automatically sends deploy/restart notifications — do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
+    description: 'Restart the NanoClawbster service. Use when asked to restart, or after making changes that require a restart to take effect. The host automatically sends deploy/restart notifications \u2014 do NOT send one yourself. After calling this tool, wrap your entire remaining output in <internal> tags since the user has already been notified.',
   },
   async () => {
     writeIpcFile(TASKS_DIR, {
@@ -378,7 +431,7 @@ Use this AFTER a PR has been merged on GitHub. The host will:
 
 If the build fails, it automatically rolls back to the previous version.
 
-The host automatically sends deploy/restart notifications — do NOT send one yourself. After calling, wrap remaining output in <internal> tags.`,
+The host automatically sends deploy/restart notifications \u2014 do NOT send one yourself. After calling, wrap remaining output in <internal> tags.`,
     inputSchema: {
       branch: z.string().default('main').describe('Branch to pull (usually "main")'),
     },
