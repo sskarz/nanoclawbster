@@ -739,6 +739,7 @@ export async function processTaskIpc(
         schedule_type: 'once',
         schedule_value: new Date().toISOString(),
         context_mode: 'isolated',
+        task_type: 'webhook',
         next_run: new Date().toISOString(),
         status: 'active',
         created_at: new Date().toISOString(),
