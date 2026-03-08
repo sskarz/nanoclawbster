@@ -13,6 +13,8 @@ const envConfig = readEnvFile([
   'WEBHOOK_PORT',
   'COMPOSIO_WEBHOOK_SECRET',
   'COMPOSIO_WEBHOOK_URL',
+  'RETELL_API_KEY',
+  'RETELL_WEBHOOK_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -88,3 +90,12 @@ export const COMPOSIO_WEBHOOK_SECRET: string =
 
 export const COMPOSIO_WEBHOOK_URL: string =
   process.env['COMPOSIO_WEBHOOK_URL'] ?? envConfig['COMPOSIO_WEBHOOK_URL'] ?? '';
+
+// Retell AI integration (optional — phone call feature)
+export const RETELL_API_KEY: string =
+  process.env['RETELL_API_KEY'] ?? envConfig['RETELL_API_KEY'] ?? '';
+
+// Public WebSocket URL for Retell to connect to (e.g. wss://your-domain.com)
+// Retell will append /llm-websocket/<call_id> to this URL.
+export const RETELL_WEBHOOK_URL: string =
+  process.env['RETELL_WEBHOOK_URL'] ?? envConfig['RETELL_WEBHOOK_URL'] ?? '';

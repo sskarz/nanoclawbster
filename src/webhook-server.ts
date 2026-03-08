@@ -51,7 +51,7 @@ function verifySignature(
   return false;
 }
 
-export function startWebhookServer(port: number, secret: string, onEvent: WebhookEventHandler): void {
+export function startWebhookServer(port: number, secret: string, onEvent: WebhookEventHandler): http.Server {
   const server = http.createServer((req, res) => {
     if (req.method !== 'POST' || req.url !== '/webhook/composio') {
       res.writeHead(404); res.end('Not found'); return;
@@ -98,4 +98,5 @@ export function startWebhookServer(port: number, secret: string, onEvent: Webhoo
   });
   server.on('error', (err) => logger.error({ err, port }, 'Webhook server error'));
   server.listen(port, () => logger.info({ port }, 'Webhook server listening on /webhook/composio'));
+  return server;
 }
