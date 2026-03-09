@@ -13,11 +13,10 @@
  * End call: set end_call: true in the response event.
  */
 
-import https from 'https';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { logger } from './logger.js';
-import { readEnvFile } from './env.js';
 
 // ---------------------------------------------------------------------------
 // Types matching Retell's WebSocket protocol
@@ -58,77 +57,7 @@ interface RetellOutgoingPingPong {
 type RetellOutgoing = RetellOutgoingConfig | RetellOutgoingResponse | RetellOutgoingPingPong;
 
 // ---------------------------------------------------------------------------
-// Anthropic API helper (raw HTTP — no SDK dependency in host)
-// ---------------------------------------------------------------------------
-
-interface AnthropicMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-/**
- * Call Claude via raw HTTPS (no npm sdk needed in host).
- * Returns the full text response.
- */
-async function callClaude(
-  apiKey: string,
-  systemPrompt: string,
-  messages: AnthropicMessage[],
-): Promise<string> {
-  const body = JSON.stringify({
-    model: 'claude-3-5-haiku-20241022',
-    max_tokens: 512,
-    system: systemPrompt,
-    messages,
-  });
-
-  return new Promise((resolve, reject) => {
-    const req = https.request(
-      {
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Length': Buffer.byteLength(body),
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          try {
-            const raw = Buffer.concat(chunks).toString('utf-8');
-            const parsed = JSON.parse(raw) as {
-              content?: Array<{ type: string; text?: string }>;
-              error?: { message: string };
-            };
-            if (parsed.error) {
-              reject(new Error(`Anthropic API error: ${parsed.error.message}`));
-              return;
-            }
-            const text = parsed.content
-              ?.filter((b) => b.type === 'text')
-              .map((b) => b.text ?? '')
-              .join('') ?? '';
-            resolve(text.trim());
-          } catch (err) {
-            reject(err);
-          }
-        });
-      },
-    );
-
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
-
-// ---------------------------------------------------------------------------
-// WebSocket LLM Handler
+// Agent SDK helper
 // ---------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = `You are Nano, an AI assistant built by Sanskar. You are calling Sanskar by phone via Retell AI.
@@ -142,53 +71,84 @@ the very end of your response (this will be stripped before speaking).
 
 Do not mention that you are an AI unless directly asked.`;
 
-function buildAnthropicMessages(
+/**
+ * Call Claude via the Agent SDK and return the full text response.
+ * Uses maxTurns: 1 for a single voice exchange turn.
+ */
+async function callClaudeAgentSdk(
+  prompt: string,
+  systemPrompt: string,
+): Promise<string> {
+  let responseText = '';
+
+  for await (const message of query({
+    prompt,
+    options: {
+      maxTurns: 1,
+      systemPrompt,
+      tools: [],
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+    },
+  })) {
+    if (message.type === 'assistant') {
+      // Extract text content blocks from the assistant message
+      for (const block of message.message.content) {
+        if (block.type === 'text') {
+          responseText += block.text;
+        }
+      }
+    } else if (message.type === 'result') {
+      // SDKResultSuccess has a `result` field with the final text
+      if (!message.is_error && 'result' in message && typeof message.result === 'string') {
+        // Use the result field if we didn't already capture text from assistant messages
+        if (!responseText.trim()) {
+          responseText = message.result;
+        }
+      }
+    }
+  }
+
+  return responseText.trim();
+}
+
+/**
+ * Build a single prompt string from the Retell transcript for the Agent SDK.
+ * The transcript is formatted as a conversation history, with the call purpose
+ * prepended if provided.
+ */
+function buildPromptFromTranscript(
   transcript: RetellTranscriptUtterance[],
   callPurpose?: string,
-): AnthropicMessage[] {
-  // Prepend a user message with call purpose if provided
-  const messages: AnthropicMessage[] = [];
+): string {
+  const lines: string[] = [];
 
   if (callPurpose) {
-    messages.push({
-      role: 'user',
-      content: `[Call context: ${callPurpose}]`,
-    });
-    messages.push({
-      role: 'assistant',
-      content: 'Understood, I\'ll keep that in mind for this call.',
-    });
+    lines.push(`[Call context: ${callPurpose}]`);
+    lines.push('');
   }
 
-  // Map Retell transcript to Anthropic messages
-  for (const utterance of transcript) {
-    messages.push({
-      role: utterance.role === 'agent' ? 'assistant' : 'user',
-      content: utterance.content,
-    });
+  if (transcript.length === 0) {
+    lines.push('(The call just started. Please greet the person.)');
+  } else {
+    lines.push('Conversation so far:');
+    for (const utterance of transcript) {
+      const role = utterance.role === 'agent' ? 'You' : 'User';
+      lines.push(`${role}: ${utterance.content}`);
+    }
+    lines.push('');
+    lines.push('Please respond to the user\'s last message.');
   }
 
-  // Anthropic requires messages to alternate roles, and last must be from user.
-  // If the last message is from assistant, add a placeholder user nudge.
-  if (messages.length === 0 || messages[messages.length - 1].role === 'assistant') {
-    messages.push({ role: 'user', content: '(please continue)' });
-  }
-
-  return messages;
+  return lines.join('\n');
 }
+
+// ---------------------------------------------------------------------------
+// WebSocket LLM Handler
+// ---------------------------------------------------------------------------
 
 function handleRetellWebSocket(ws: WebSocket, callId: string, callPurpose?: string): void {
   logger.info({ callId, callPurpose }, 'Retell WebSocket connected');
-
-  // Read secrets fresh per-call to pick up .env changes without restart
-  const env = readEnvFile(['ANTHROPIC_API_KEY']);
-  const apiKey = process.env.ANTHROPIC_API_KEY || env.ANTHROPIC_API_KEY || '';
-
-  if (!apiKey) {
-    logger.error({ callId }, 'ANTHROPIC_API_KEY not configured — cannot handle Retell call');
-    ws.close(1011, 'LLM not configured');
-    return;
-  }
 
   // Send initial config
   const config: RetellOutgoingConfig = {
@@ -238,13 +198,13 @@ function handleRetellWebSocket(ws: WebSocket, callId: string, callPurpose?: stri
     }
 
     const transcript = event.transcript ?? [];
-    const messages = buildAnthropicMessages(transcript, callPurpose);
+    const prompt = buildPromptFromTranscript(transcript, callPurpose);
 
     isGenerating = true;
 
     try {
-      logger.info({ callId, responseId, turns: transcript.length }, 'Calling Claude for Retell response');
-      const rawContent = await callClaude(apiKey, SYSTEM_PROMPT, messages);
+      logger.info({ callId, responseId, turns: transcript.length }, 'Calling Claude Agent SDK for Retell response');
+      const rawContent = await callClaudeAgentSdk(prompt, SYSTEM_PROMPT);
 
       // Check if we should end the call
       const shouldEndCall = rawContent.includes('[END_CALL]');
