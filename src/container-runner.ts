@@ -686,10 +686,11 @@ export function writeTasksSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all tasks, others only see their own
-  const filteredTasks = isAdmin
-    ? tasks
-    : tasks.filter((t) => t.groupFolder === groupFolder);
+  // Exclude completed tasks — they bloat the file and agents don't need them.
+  // Main sees all non-completed tasks, others only see their own.
+  const filteredTasks = tasks
+    .filter((t) => t.status !== 'completed')
+    .filter((t) => isAdmin || t.groupFolder === groupFolder);
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));

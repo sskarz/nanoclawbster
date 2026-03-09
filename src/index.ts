@@ -7,6 +7,7 @@ import {
   DATA_DIR,
   DISCORD_BOT_TOKEN,
   IDLE_TIMEOUT,
+  MAX_SESSION_FILE_SIZE,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
   WEBHOOK_PORT,
@@ -247,7 +248,56 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isAdmin = group.isAdmin === true;
-  const sessionId = sessions[group.folder];
+  let sessionId: string | undefined = sessions[group.folder];
+
+  // Trim oversized session files to last compact boundary
+  if (sessionId) {
+    try {
+      const sessionFile = path.join(
+        DATA_DIR, 'sessions', group.folder,
+        '.claude', 'projects', '-workspace-group',
+        `${sessionId}.jsonl`,
+      );
+      const stat = fs.statSync(sessionFile, { throwIfNoEntry: false });
+      if (stat && stat.size > MAX_SESSION_FILE_SIZE) {
+        const content = fs.readFileSync(sessionFile, 'utf-8');
+        const lines = content.split('\n');
+        let lastBoundaryIdx = -1;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (lines[i].includes('"subtype":"compact_boundary"')) {
+            lastBoundaryIdx = i;
+            break;
+          }
+        }
+        if (lastBoundaryIdx > 0) {
+          const trimmed = lines.slice(lastBoundaryIdx).join('\n');
+          if (trimmed.length <= MAX_SESSION_FILE_SIZE) {
+            fs.writeFileSync(sessionFile, trimmed);
+            logger.warn(
+              { group: group.name, before: stat.size, after: trimmed.length },
+              'Trimmed oversized session file to last compact boundary',
+            );
+          } else {
+            // Still too large after trim — start fresh
+            sessionId = undefined;
+            logger.warn(
+              { group: group.name, size: stat.size },
+              'Session file too large even after trim, starting fresh session',
+            );
+          }
+        } else {
+          // No compact boundary found — start fresh
+          sessionId = undefined;
+          logger.warn(
+            { group: group.name, size: stat.size },
+            'Oversized session file has no compact boundary, starting fresh session',
+          );
+        }
+      }
+    } catch (err) {
+      logger.error({ err, group: group.name }, 'Failed to trim session file, continuing with existing session');
+    }
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();

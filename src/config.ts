@@ -99,3 +99,7 @@ export const RETELL_API_KEY: string =
 // Retell will append /llm-websocket/<call_id> to this URL.
 export const RETELL_WEBHOOK_URL: string =
   process.env['RETELL_WEBHOOK_URL'] ?? envConfig['RETELL_WEBHOOK_URL'] ?? '';
+export const MAX_SESSION_FILE_SIZE = parseInt(
+  process.env.MAX_SESSION_FILE_SIZE || '10485760',
+  10,
+); // 10MB default
