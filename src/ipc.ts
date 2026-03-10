@@ -537,8 +537,13 @@ export async function processTaskIpc(
 
       logger.info({ sourceGroup }, 'Test container build requested from dev workspace');
       const { execSync: execSyncTestBuild } = await import('child_process');
-      const devContainerDir = path.join(DATA_DIR, 'dev-workspace', 'container');
-      const resultPath = path.join(DATA_DIR, 'dev-workspace', '.build-result.json');
+      const groupDevDir = path.join(DATA_DIR, 'dev', sourceGroup);
+      if (!fs.existsSync(groupDevDir)) {
+        logger.warn({ sourceGroup }, 'No dev workspace found for group');
+        break;
+      }
+      const devContainerDir = path.join(groupDevDir, 'container');
+      const resultPath = path.join(groupDevDir, '.build-result.json');
       const startTime = Date.now();
 
       try {
@@ -669,15 +674,21 @@ export async function processTaskIpc(
         }
       }
 
-      // 6. Sync dev workspace to match the deployed branch
-      const devWorkspaceDir = path.join(DATA_DIR, 'dev-workspace');
-      if (fs.existsSync(devWorkspaceDir)) {
-        try {
-          execSyncDeploy(`git fetch origin ${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 60_000 });
-          execSyncDeploy(`git reset --hard origin/${branch}`, { cwd: devWorkspaceDir, stdio: 'pipe', timeout: 30_000 });
-          logger.info('Dev workspace synced to deployed branch');
-        } catch (err) {
-          logger.warn({ err }, 'Dev workspace sync failed — non-fatal');
+      // 6. Sync all per-group dev workspaces to match the deployed branch
+      const devBaseDir = path.join(DATA_DIR, 'dev');
+      if (fs.existsSync(devBaseDir)) {
+        const devGroups = fs.readdirSync(devBaseDir).filter(f => {
+          try { return fs.statSync(path.join(devBaseDir, f)).isDirectory(); } catch { return false; }
+        });
+        for (const devGroup of devGroups) {
+          const devDir = path.join(devBaseDir, devGroup);
+          try {
+            execSyncDeploy(`git fetch origin ${branch}`, { cwd: devDir, stdio: 'pipe', timeout: 60_000 });
+            execSyncDeploy(`git reset --hard origin/${branch}`, { cwd: devDir, stdio: 'pipe', timeout: 30_000 });
+            logger.info({ devGroup }, 'Dev workspace synced');
+          } catch (err) {
+            logger.warn({ err, devGroup }, 'Dev workspace sync failed — non-fatal');
+          }
         }
       }
 
