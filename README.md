@@ -8,6 +8,10 @@
   <a href="https://github.com/sskarz/nanoclawbster"><img src="https://img.shields.io/badge/GitHub-NanoClawbster-red?logo=github" alt="GitHub"></a>&nbsp;
 </p>
 
+<p align="center">
+  <img src="assets/loc-history.svg" alt="Lines of Code History" width="700">
+</p>
+
 ---
 
 # NanoClawbster
