@@ -139,19 +139,17 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Webhook tasks: suppress plain text output entirely.
+          // Scheduled/webhook tasks: suppress plain text output entirely.
           // The agent uses the send_message IPC tool to notify the user —
           // that path is independent of result.result and is unaffected.
           // This is a deterministic host-level gate so agent reasoning text
           // can never leak as a Discord message regardless of what the LLM outputs.
-          if (task.task_type !== 'webhook') {
-            await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          } else {
-            logger.debug(
-              { taskId: task.id },
-              'Webhook task: suppressing plain text output (agent should use send_message tool)',
-            );
-          }
+          // Without this, the user gets duplicate messages: one from send_message
+          // IPC and one from the text output here.
+          logger.debug(
+            { taskId: task.id, taskType: task.task_type },
+            'Scheduled task: suppressing plain text output (agent should use send_message tool)',
+          );
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
