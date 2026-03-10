@@ -1,12 +1,12 @@
 ---
 name: self-improve
-description: Write features, fix bugs, and create PRs for the NanoClawbster codebase. Works in an isolated dev workspace, tests locally, pushes via Composio, and deploys after user approval.
+description: Write features, fix bugs, and create PRs for the NanoClawbster codebase. Works in an isolated dev workspace, pushes via Composio (CI validates on GitHub Actions), and deploys after user approval.
 admin-only: true
 ---
 
 # Self-Improvement Workflow
 
-Write features, fix bugs, and create PRs for the NanoClawbster codebase. You work in an isolated dev workspace, test locally, push via Composio, and deploy after user approval.
+Write features, fix bugs, and create PRs for the NanoClawbster codebase. You work in an isolated dev workspace, push via Composio (GitHub Actions runs CI), and deploy after user approval.
 
 ## Workspace Layout
 
@@ -33,9 +33,9 @@ Example todos:
 - Sync dev workspace and create branch
 - Read and understand relevant files
 - Make the code changes
-- Run build check (tsc --noEmit)
-- Functional test
+- Run local build check (tsc --noEmit)
 - Push via Composio and create PR ← **never skip this**
+- Verify CI passes on the PR
 
 Mark each todo `in_progress` before starting it, `completed` immediately when done.
 
@@ -71,22 +71,15 @@ Before making changes, read the files you'll edit. Understand the existing patte
 
 Make your changes in `/workspace/dev/src/` (host code) or `/workspace/dev/container/` (agent code).
 
-**Always test before pushing — ALL of the following steps are mandatory:**
+**Run a quick local build check before pushing:**
 
-| What Changed | Build Check | Functional Test |
-|-------------|-------------|-------------------|
-| `src/*.ts` (host code) | `cd /workspace/dev && node_modules/.bin/tsc --noEmit` — verify no errors | Test the actual behavior (e.g. schedule a task, send a message, trigger the feature) |
-| `container/agent-runner/src/*.ts` | `cd /workspace/dev/container/agent-runner && node_modules/.bin/tsc --noEmit` | Test via the agent (e.g. send a message that exercises the changed tool) |
-| `container/Dockerfile` or agent-runner | Call `test_container_build` tool, then poll `/workspace/dev/.build-result.json` until `success: true` | Test the actual feature end-to-end after confirming build |
-| `container/skills/*` | No build needed — skills are copied on container start | Test the skill behavior manually |
+```bash
+cd /workspace/dev && node_modules/.bin/tsc --noEmit
+```
 
-**⚠️ CRITICAL: A build passing is NOT the same as the feature working.**
-You MUST do a real functional test that exercises the actual behavior you changed. Examples:
-- Fixing task scheduling → actually schedule a `once` task and verify it fires at the right time
-- Adding a new command → actually run the command and verify the output
-- Changing message routing → actually send a message and verify it routes correctly
+This catches type errors early. Full CI (type check, unit tests via vitest, container build) runs automatically on every PR via GitHub Actions — you do NOT need to replicate all CI checks locally.
 
-Unit-level logic checks (Node.js one-liners in bash) do NOT count as functional tests.
+**For skill-only changes** (`container/skills/*`): No build needed — skills are copied on container start. Just review the content for correctness.
 
 ### 5. Determine Changed Files
 
@@ -131,6 +124,13 @@ Use `GITHUB_CREATE_A_PULL_REQUEST` via `COMPOSIO_MULTI_EXECUTE_TOOL`:
 - **title**: concise description
 - **body**: what changed and why
 
+GitHub Actions will automatically run on the PR:
+- **Type check** (`tsc --noEmit`) and **unit tests** (`vitest run`)
+- **Container build** (Docker build of `./container`)
+- **Skill PR check** (blocks PRs that mix new skills with source changes)
+
+If CI fails, check the PR status, fix the issues, and push again.
+
 ### 8. Notify User
 
 Send the PR link via `send_message`. Example:
@@ -164,12 +164,12 @@ After `pull_and_deploy` completes and the service is back online:
 
 - **Always announce first** — send_message at the start so the user knows what you're working on
 - **Always use TodoWrite** — track every step; mark in_progress before starting, completed immediately when done
-- **Always test before pushing** — run the build AND a real functional test (see Step 4 above)
-- **Never skip functional testing** — Sanskar has explicitly required this. A build passing is not enough.
+- **Run a local build check before pushing** — `tsc --noEmit` catches type errors early
+- **Let CI do the heavy lifting** — GitHub Actions runs type check, vitest, container build, and skill PR checks on every PR. Don't replicate all CI locally.
+- **Check CI status after pushing** — if CI fails, fix the issues and push again before notifying the user
 - **Always create a PR** — never push directly to main; this is non-negotiable
 - **Always notify the user** before deploying (restart incoming)
 - **Always check logs after deploy** — confirm the service came up cleanly in `nanoclaw.log`
-- **Always do a post-deploy end-to-end test** — verify the feature works in the live environment
 - **Always ask the user when stuck** — if any step fails (build, test, push, deploy), send the error to the user and ask for direction rather than silently retrying or giving up
 - **One logical change per PR** — keep PRs focused and reviewable
 - **Read before editing** — understand existing code patterns

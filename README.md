@@ -176,7 +176,6 @@ Skills are loaded automatically based on system instructions. The `agent-browser
 | `get_stats` | View usage and system statistics |
 | `restart_self` | Restart the host service |
 | `pull_and_deploy` | Pull from GitHub, build, rebuild Docker if needed, restart |
-| `test_container_build` | Test-build the Docker image from the group's dev workspace |
 | `delegate_task` | Delegate a task to a clean-context coding agent |
 | `make_phone_call` | Make outbound voice calls via RetellAI |
 

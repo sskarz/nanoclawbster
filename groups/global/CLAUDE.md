@@ -15,7 +15,6 @@ Your group folder and permission level are injected by the host at runtime via e
 Main-group-only capabilities (unavailable unless you are the main group):
 - `register_group` — registering new channels/groups
 - `pull_and_deploy` — deploying code changes
-- `test_container_build` — testing Docker builds
 - Scheduling tasks for other groups
 
 ## What You Can Do

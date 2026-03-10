@@ -81,7 +81,6 @@ Each registered group has an `is_admin` flag in the DB (`registered_groups.is_ad
 - `get_stats` — usage/system statistics
 - `restart_self` — restart the host service
 - `pull_and_deploy` — pull from GitHub, build, optionally rebuild Docker, restart
-- `test_container_build` — test-build the Docker image without deploying
 - `delegate_task` — delegate a task to a clean-context coding agent (no conversation history)
 
 **All-agent tools** (available to every group):

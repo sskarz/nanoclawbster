@@ -454,38 +454,6 @@ The host automatically sends deploy/restart notifications \u2014 do NOT send one
   },
 );
 
-server.registerTool(
-  'test_container_build',
-  {
-    description: `Test-build the Docker container image from the dev workspace without deploying.
-
-Use this to verify Dockerfile or agent-runner changes compile and build correctly
-before creating a PR. The host builds from /workspace/dev/container/ and writes
-the result to /workspace/dev/.build-result.json.
-
-After calling this tool, poll the result file:
-  cat /workspace/dev/.build-result.json
-It may take 2-5 minutes. The file contains {success, error?, duration_ms, timestamp}.`,
-  },
-  async () => {
-    // Clear any previous result
-    try { fs.unlinkSync('/workspace/dev/.build-result.json'); } catch { /* ok */ }
-
-    writeIpcFile(TASKS_DIR, {
-      type: 'test_container_build',
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    });
-
-    return {
-      content: [{
-        type: 'text' as const,
-        text: 'Test build initiated. Poll /workspace/dev/.build-result.json for the result (2-5 min). The build uses the dev workspace, NOT the live code.',
-      }],
-    };
-  },
-);
-
 // ---------------------------------------------------------------------------
 // make_phone_call — admin only
 // ---------------------------------------------------------------------------

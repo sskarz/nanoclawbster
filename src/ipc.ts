@@ -529,45 +529,6 @@ export async function processTaskIpc(
       break;
     }
 
-    case 'test_container_build': {
-      if (!isAdmin) {
-        logger.warn({ sourceGroup }, 'Unauthorized test_container_build attempt');
-        break;
-      }
-
-      logger.info({ sourceGroup }, 'Test container build requested from dev workspace');
-      const { execSync: execSyncTestBuild } = await import('child_process');
-      const groupDevDir = path.join(DATA_DIR, 'dev', sourceGroup);
-      if (!fs.existsSync(groupDevDir)) {
-        logger.warn({ sourceGroup }, 'No dev workspace found for group');
-        break;
-      }
-      const devContainerDir = path.join(groupDevDir, 'container');
-      const resultPath = path.join(groupDevDir, '.build-result.json');
-      const startTime = Date.now();
-
-      try {
-        execSyncTestBuild('docker build -t nanoclawbster-agent:test .', {
-          cwd: devContainerDir,
-          stdio: 'pipe',
-          timeout: 10 * 60 * 1000,
-        });
-
-        // Clean up test image
-        try { execSyncTestBuild('docker rmi nanoclawbster-agent:test', { stdio: 'pipe' }); } catch { /* ok */ }
-
-        const result = { success: true, duration_ms: Date.now() - startTime, timestamp: new Date().toISOString() };
-        fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
-        logger.info({ duration_ms: result.duration_ms }, 'Test container build succeeded');
-      } catch (err) {
-        const stderr = err instanceof Error && 'stderr' in err ? (err as any).stderr?.toString().slice(-2000) : String(err);
-        const result = { success: false, error: stderr, duration_ms: Date.now() - startTime, timestamp: new Date().toISOString() };
-        fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
-        logger.error({ err }, 'Test container build failed');
-      }
-      // NOTE: No process.exit() — the host keeps running. This is a non-destructive test.
-      break;
-    }
 
     case 'pull_and_deploy': {
       if (!isAdmin) {

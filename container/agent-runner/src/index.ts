@@ -453,7 +453,6 @@ async function runQuery(
         'Task', 'TaskOutput', 'TaskStop',
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
         'mcp__nanoclawbster__*',
         ...(containerInput.isAdmin ? ['mcp__composio__*'] : []),
       ],
