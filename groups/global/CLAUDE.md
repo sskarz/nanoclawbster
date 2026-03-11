@@ -26,12 +26,15 @@ Main-group-only capabilities (unavailable unless you are the main group):
 - Run bash commands in your sandbox
 - Schedule tasks to run later or on a recurring basis
 - Send messages back to the chat
+- Ask questions and wait for the user's reply before continuing
 
 ## Communication
 
 Your output is sent to the user or group.
 
 You also have `mcp__nanoclawbster__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
+
+You also have `mcp__nanoclawbster__ask_user` which sends a question and *pauses execution* until the user replies (5-minute timeout). Use this when you need an answer before you can continue — e.g., choosing between options, confirming a destructive action, or getting missing information. Prefer `ask_user` over `send_message` whenever your next step depends on the user's input.
 
 ### Internal thoughts
 
@@ -47,7 +50,7 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 ### Sub-agents and teammates
 
-When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
+When working as a sub-agent or teammate, only use `send_message` or `ask_user` if instructed to by the main agent.
 
 ## Your Workspace
 
