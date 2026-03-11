@@ -36,13 +36,12 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## When You're Stuck
 
-If something fails, errors out, or doesn't work as expected — *tell the user*. Do not silently retry, skip steps, or move on. Use `send_message` to:
+If something fails, errors out, or doesn't work as expected — *tell the user*. Do not silently retry, skip steps, or move on.
 
-- Explain what you tried and what went wrong (include the actual error)
-- Ask the user for direction on how to proceed
-- Suggest possible fixes if you have ideas, but let the user decide
+- Use `ask_user` when you need the user's input before you can continue (e.g., choosing a fix, confirming an action, getting a missing value). This pauses execution and waits for their reply.
+- Use `send_message` when you just need to inform the user but can keep working (e.g., progress updates, final status reports).
 
-This is especially important for operations you can't debug yourself (deploy failures, permission errors, external service issues). The user can often fix environment problems you can't see from inside the container. Never assume a failure is unrecoverable — ask first.
+Include the actual error, explain what you tried, and suggest possible fixes — but let the user decide. This is especially important for operations you can't debug yourself (deploy failures, permission errors, external service issues). The user can often fix environment problems you can't see from inside the container. Never assume a failure is unrecoverable — ask first.
 
 ## Memory
 
