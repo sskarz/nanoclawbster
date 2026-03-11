@@ -559,21 +559,6 @@ async function sendRestartNotifications(): Promise<void> {
   }
 }
 
-function writeIpcTask(prefix: string, payload: Record<string, unknown>, adminGroup: RegisteredGroup, chatJid: string): void {
-  const tasksDir = path.join(DATA_DIR, 'ipc', adminGroup.folder, 'tasks');
-  try {
-    fs.mkdirSync(tasksDir, { recursive: true });
-    const filename = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-    fs.writeFileSync(
-      path.join(tasksDir, filename),
-      JSON.stringify({ ...payload, chatJid }),
-      'utf-8',
-    );
-    logger.info({ filename, prefix, chatJid }, 'IPC task written');
-  } catch (err) {
-    logger.error({ err, prefix }, 'Failed to write IPC task');
-  }
-}
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
@@ -648,13 +633,25 @@ async function main(): Promise<void> {
             logger.warn('Webhook received but no admin group registered — cannot deliver notification');
             return;
           }
-          writeIpcTask('webhook', { type: 'webhook_event', triggerName, webhookPayload: payload }, adminEntry[1], adminEntry[0]);
+          const payloadStr = JSON.stringify(payload, null, 2);
+          const truncatedPayload = payloadStr.length > 800 ? payloadStr.slice(0, 800) + '\n...(truncated)' : payloadStr;
+          storeMessage({
+            id: `webhook-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            chat_jid: adminEntry[0],
+            sender: 'system:composio',
+            sender_name: 'Webhook Event',
+            content: `[Webhook] ${triggerName}\n${truncatedPayload}\n\n[Note: Decide if this is noteworthy. If so, notify the user via send_message. If it's noise (e.g. synchronize event, bot commit), do nothing.]`,
+            timestamp: new Date().toISOString(),
+            is_from_me: false,
+            is_bot_message: false,
+          });
+          logger.info({ triggerName, chatJid: adminEntry[0] }, 'Composio webhook event stored in conversation history');
         },
       } : undefined,
       retell: {
         apiKey: RETELL_API_KEY || undefined,
-        onEvent: (event, call) => {
-          // Find admin group (IPC files go into admin dir)
+        onEvent: (_event, rawCall) => {
+          // Find admin group
           const adminEntry = Object.entries(registeredGroups).find(([, g]) => g.isAdmin === true);
           if (!adminEntry) {
             logger.warn('Retell webhook received but no admin group registered');
@@ -670,7 +667,58 @@ async function main(): Promise<void> {
               logger.warn({ folder: RETELL_WEBHOOK_GROUP }, 'RETELL_WEBHOOK_GROUP folder not found, falling back to admin');
             }
           }
-          writeIpcTask('retell', { type: 'retell_call', event, webhookPayload: call }, adminEntry[1], targetJid);
+
+          const call = rawCall as Record<string, unknown>;
+          // Format call details
+          const direction = String(call['direction'] ?? 'unknown');
+          const fromNumber = String(call['from_number'] ?? 'unknown');
+          const toNumber = String(call['to_number'] ?? 'unknown');
+          const durationMs = Number(call['duration_ms'] ?? 0);
+          const durationStr = durationMs > 0
+            ? `${Math.floor(durationMs / 60000)}m ${Math.floor((durationMs % 60000) / 1000)}s`
+            : 'unknown';
+          const disconnectReason = call['disconnection_reason'] ? String(call['disconnection_reason']) : undefined;
+          const callAnalysis = call['call_analysis'] as Record<string, unknown> | undefined;
+
+          // Format transcript
+          let transcriptText = '';
+          const transcriptObj = call['transcript_object'] as Array<Record<string, unknown>> | undefined;
+          if (Array.isArray(transcriptObj) && transcriptObj.length > 0) {
+            transcriptText = transcriptObj
+              .map((t) => `${String(t['role'] ?? 'unknown')}: ${String(t['content'] ?? '')}`)
+              .join('\n');
+          } else if (call['transcript']) {
+            transcriptText = String(call['transcript']);
+          }
+
+          // Build stored message
+          const callSummaryParts = [
+            `[Phone Call] ${direction} call from ${fromNumber} to ${toNumber} (${durationStr})`,
+          ];
+          if (disconnectReason) callSummaryParts.push(`Disconnect: ${disconnectReason}`);
+          if (callAnalysis) {
+            const analysisStr = JSON.stringify(callAnalysis);
+            callSummaryParts.push(`Analysis: ${analysisStr.length > 300 ? analysisStr.slice(0, 300) + '...' : analysisStr}`);
+          }
+          if (transcriptText) {
+            const excerpt = transcriptText.length > 500 ? transcriptText.slice(0, 500) + '...' : transcriptText;
+            callSummaryParts.push(`Transcript excerpt:\n${excerpt}`);
+          } else {
+            callSummaryParts.push('(No transcript available)');
+          }
+          callSummaryParts.push('', '[Note: If the caller made requests, take action. Otherwise send a brief summary via send_message.]');
+
+          storeMessage({
+            id: `retell-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            chat_jid: targetJid,
+            sender: 'system:retell',
+            sender_name: 'Phone Call',
+            content: callSummaryParts.join('\n'),
+            timestamp: new Date().toISOString(),
+            is_from_me: false,
+            is_bot_message: false,
+          });
+          logger.info({ direction, fromNumber, chatJid: targetJid }, 'Retell call event stored in conversation history');
         },
       },
     });

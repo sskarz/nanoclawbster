@@ -163,13 +163,13 @@ A personal Claude assistant accessible via Discord, with minimal custom code.
 - Outbound voice calls via `make_phone_call` admin tool
 - Dynamic variables passed to RetellAI agent (call purpose, message)
 - Webhook receiver for `call_analyzed` events with signature verification
-- Call analysis results dispatched to configurable group via IPC
-- Call events persisted in conversation history (direction, numbers, duration, analysis, transcript excerpt) so the regular agent can reference them
+- Call events persisted directly in conversation history (direction, numbers, duration, analysis, transcript excerpt)
+- The regular conversational agent handles webhook events — no separate webhook task agents
 
 ### Webhook Event Persistence
-- Webhook events (RetellAI calls, Composio triggers) are stored as non-bot messages in the `messages` table when received
+- Webhook events (RetellAI calls, Composio triggers) are stored directly as non-bot messages in the `messages` table on receipt (in `src/index.ts` onEvent callbacks)
 - Messages use `is_bot_message: false` so they appear in `getMessagesSince()` and become part of the group's conversation context
-- The regular conversational agent can reference past webhook events when the user asks about them
+- The regular conversational agent picks them up via the message loop and decides how to respond (has full conversation context)
 - Payloads are truncated to keep stored messages compact (500 chars for transcripts, 800 chars for webhook payloads)
 
 ---
