@@ -104,28 +104,32 @@ Copy `.env.example` to `.env` and configure:
 
 ```bash
 # Authentication (one required)
-ANTHROPIC_API_KEY=          # Anthropic API key (pay-per-use)
-CLAUDE_CODE_OAUTH_TOKEN=    # Claude Code OAuth token (subscription)
+ANTHROPIC_API_KEY=              # Anthropic API key (pay-per-use)
+# CLAUDE_CODE_OAUTH_TOKEN=     # Or: Claude subscription token (run `claude setup-token`)
 
 # Discord (required)
-DISCORD_BOT_TOKEN=          # From https://discord.com/developers/applications
-ASSISTANT_NAME=Andy         # The @mention trigger word
+DISCORD_BOT_TOKEN=              # From https://discord.com/developers/applications
+ASSISTANT_NAME=Andy             # The @mention trigger word
 
-# Webhooks (optional — for Composio triggers like Gmail, GitHub events)
-WEBHOOK_PORT=3456
-COMPOSIO_WEBHOOK_SECRET=
+# Composio (optional — for 1000+ app integrations like Gmail, GitHub)
+COMPOSIO_API_KEY=               # API key from https://app.composio.dev/settings
+WEBHOOK_PORT=3456               # Port for incoming webhook server
+COMPOSIO_WEBHOOK_SECRET=        # Webhook signing secret from Composio Project Settings
+COMPOSIO_WEBHOOK_URL=           # Public URL for webhook delivery
 
-# RetellAI phone calls (optional)
-RETELL_API_KEY=               # RetellAI API key
-RETELL_AGENT_ID=              # RetellAI agent ID
-RETELL_FROM_NUMBER=           # E.164 format (e.g. +14157774444)
-RETELL_WEBHOOK_GROUP=         # Group folder for call analysis events
+# RetellAI (optional — for outbound phone calls)
+# RETELL_API_KEY=               # API key from https://www.retellai.com
+# RETELL_WEBHOOK_GROUP=         # Group folder to receive call analysis results
 
 # Container tuning (optional)
 CONTAINER_IMAGE=nanoclawbster-agent:latest
-CONTAINER_TIMEOUT=1800000     # 30 min
-IDLE_TIMEOUT=1800000          # 30 min
-MAX_CONCURRENT_CONTAINERS=5
+CONTAINER_TIMEOUT=1800000       # Container timeout in ms (default: 30 min)
+IDLE_TIMEOUT=1800000            # Idle timeout before closing container stdin (default: 30 min)
+MAX_CONCURRENT_CONTAINERS=5     # Max parallel agent containers
+
+# General (optional)
+# TZ=America/Los_Angeles        # Timezone for scheduled tasks
+# LOG_LEVEL=info                 # Logging verbosity: trace, debug, info, warn, error
 ```
 
 ## Registering Groups
