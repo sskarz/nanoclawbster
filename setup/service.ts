@@ -186,6 +186,40 @@ function checkDockerGroupStale(): boolean {
   }
 }
 
+/**
+ * Stop and disable any previously-installed service that uses a different unit name
+ * (e.g. "nanoclaw" vs "nanoclawbster") to prevent duplicate processes.
+ */
+function migrateOldService(systemctlPrefix: string, currentUnitPath: string): void {
+  const altNames = ['nanoclaw', 'nanoclawbster'];
+  const currentName = path.basename(currentUnitPath, '.service');
+
+  for (const name of altNames) {
+    if (name === currentName) continue;
+    try {
+      execSync(`${systemctlPrefix} is-enabled ${name} 2>/dev/null`, { stdio: 'pipe' });
+      // Old service exists — stop and disable it
+      logger.info({ oldService: name }, 'Found old service unit, migrating');
+      try { execSync(`${systemctlPrefix} stop ${name}`, { stdio: 'ignore' }); } catch { /* already stopped */ }
+      try { execSync(`${systemctlPrefix} disable ${name}`, { stdio: 'ignore' }); } catch { /* already disabled */ }
+
+      // Remove the old unit file if it exists
+      const altPaths = [
+        `/etc/systemd/system/${name}.service`,
+        path.join(os.homedir(), '.config', 'systemd', 'user', `${name}.service`),
+      ];
+      for (const p of altPaths) {
+        if (fs.existsSync(p)) {
+          fs.unlinkSync(p);
+          logger.info({ path: p }, 'Removed old service unit file');
+        }
+      }
+    } catch {
+      // Service doesn't exist, nothing to migrate
+    }
+  }
+}
+
 function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): void {
   const runningAsRoot = isRoot();
 
@@ -211,6 +245,9 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
     unitPath = path.join(unitDir, 'nanoclawbster.service');
     systemctlPrefix = 'systemctl --user';
   }
+
+  // Migrate any old service with a different name to prevent duplicate processes
+  migrateOldService(systemctlPrefix, unitPath);
 
   const unit = `[Unit]
 Description=NanoClawbster Personal Assistant

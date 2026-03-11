@@ -13,6 +13,7 @@ import readline from 'readline';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
+import { REGISTERED_GROUPS_SCHEMA } from '../src/db-schema.js';
 import { commandExists, getPlatform, isWSL } from './platform.js';
 
 const PROJECT_ROOT = process.cwd();
@@ -562,16 +563,7 @@ async function stepRegisterAdmin(rl: readline.Interface, assistantName: string):
     fs.mkdirSync(path.join(PROJECT_ROOT, 'data'), { recursive: true });
 
     const db = new Database(dbPath);
-    db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL,
-      added_at TEXT NOT NULL,
-      container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1,
-      is_admin INTEGER DEFAULT 0
-    )`);
+    db.exec(REGISTERED_GROUPS_SCHEMA);
 
     // Migration: add is_admin column if missing
     try {
@@ -653,17 +645,7 @@ async function stepRegisterAdmin(rl: readline.Interface, assistantName: string):
 async function stepService(): Promise<void> {
   heading('Step 5: Install and start service');
 
-  // Build TypeScript
-  console.log('  Building TypeScript...');
-  try {
-    execSync('npm run build', { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
-    success('TypeScript build succeeded');
-  } catch {
-    fail('TypeScript build failed');
-    process.exit(1);
-  }
-
-  // Import and run the existing service setup
+  // Import and run the existing service setup (which handles the TypeScript build)
   const { run } = await import('./service.js');
   await run([]);
 }
