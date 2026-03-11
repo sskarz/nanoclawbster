@@ -9,7 +9,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, isAdminGroupFolder, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, isAdminGroupFolder, storeMessage, updateTask } from './db.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { formatOutbound } from './router.js';
 import { logger } from './logger.js';
@@ -793,6 +793,33 @@ export async function processTaskIpc(
       );
       const retellPrompt = retellPromptParts.join('\n');
 
+      // Persist call event in conversation history so the regular agent has context
+      const callSummaryParts = [
+        `[Phone Call] ${direction} call from ${fromNumber} to ${toNumber} (${durationStr})`,
+      ];
+      if (disconnectReason) callSummaryParts.push(`Disconnect: ${disconnectReason}`);
+      if (callAnalysis) {
+        const analysisStr = JSON.stringify(callAnalysis);
+        callSummaryParts.push(`Analysis: ${analysisStr.length > 300 ? analysisStr.slice(0, 300) + '...' : analysisStr}`);
+      }
+      if (transcriptText) {
+        const excerpt = transcriptText.length > 500 ? transcriptText.slice(0, 500) + '...' : transcriptText;
+        callSummaryParts.push(`Transcript excerpt:\n${excerpt}`);
+      } else {
+        callSummaryParts.push('(No transcript available)');
+      }
+
+      storeMessage({
+        id: `retell-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        chat_jid: data.chatJid,
+        sender: 'system:retell',
+        sender_name: 'Phone Call',
+        content: callSummaryParts.join('\n'),
+        timestamp: new Date().toISOString(),
+        is_from_me: false,
+        is_bot_message: false,
+      });
+
       const retellTaskId = `retell-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       createTask({
         id: retellTaskId,
@@ -839,6 +866,22 @@ export async function processTaskIpc(
             `If you decide this event is not worth notifying about, output nothing at all — not even "staying silent" or any explanation.`,
             `Wrap all internal reasoning in <internal> tags so it is not sent to the user.`,
           ].join('\n');
+
+      // Persist webhook event in conversation history so the regular agent has context
+      const payloadStr = JSON.stringify(data.webhookPayload, null, 2);
+      const truncatedPayload = payloadStr.length > 800 ? payloadStr.slice(0, 800) + '\n...(truncated)' : payloadStr;
+
+      storeMessage({
+        id: `webhook-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        chat_jid: data.chatJid,
+        sender: 'system:composio',
+        sender_name: 'Webhook Event',
+        content: `[Webhook] ${data.triggerName}\n${truncatedPayload}`,
+        timestamp: new Date().toISOString(),
+        is_from_me: false,
+        is_bot_message: false,
+      });
+
       const webhookTaskId = `webhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       createTask({
         id: webhookTaskId,
