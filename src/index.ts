@@ -157,6 +157,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  // System-only batches (e.g. webhook events) — suppress agent text output.
+  // Agent must use send_message IPC tool for deliberate notifications.
+  const isSystemOnlyBatch = missedMessages.every(m => m.sender.startsWith('system:'));
+
   // Check trigger requirement:
   // - Non-admin groups require a trigger by default (unless requiresTrigger is explicitly false)
   // - Admin group also checks trigger if requiresTrigger is explicitly set to true
@@ -206,15 +210,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+        if (isSystemOnlyBatch) {
+          logger.debug({ group: group.name }, `Suppressed agent text for system-only batch: ${text.slice(0, 120)}`);
+        } else {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
     }
 
     if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
+      if (isSystemOnlyBatch) {
+        // Close container promptly — no user to wait for
+        setTimeout(() => queue.closeStdin(chatJid), 10_000);
+      } else {
+        queue.notifyIdle(chatJid);
+      }
     }
 
     if (result.status === 'error') {
@@ -640,7 +653,7 @@ async function main(): Promise<void> {
             chat_jid: adminEntry[0],
             sender: 'system:composio',
             sender_name: 'Webhook Event',
-            content: `[Webhook] ${triggerName}\n${truncatedPayload}\n\n[Note: Decide if this is noteworthy. If so, notify the user via send_message. If it's noise (e.g. synchronize event, bot commit), do nothing.]`,
+            content: `[Webhook] ${triggerName}\n${truncatedPayload}\n\n[Note: Your text output is suppressed for webhook events — the user will NOT see anything you say unless you use the send_message tool. If this is noteworthy, use send_message to notify the user. If it's noise (e.g. synchronize event, bot commit, welcome email), do nothing.]`,
             timestamp: new Date().toISOString(),
             is_from_me: false,
             is_bot_message: false,
@@ -706,7 +719,7 @@ async function main(): Promise<void> {
           } else {
             callSummaryParts.push('(No transcript available)');
           }
-          callSummaryParts.push('', '[Note: If the caller made requests, take action. Otherwise send a brief summary via send_message.]');
+          callSummaryParts.push('', '[Note: Your text output is suppressed for webhook events — the user will NOT see anything you say unless you use the send_message tool. If the caller made requests, take action. Always send a brief summary of the call via send_message.]');
 
           storeMessage({
             id: `retell-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
