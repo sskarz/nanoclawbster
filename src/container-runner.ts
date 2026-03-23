@@ -99,11 +99,36 @@ function buildVolumeMounts(
 
   // Dev workspace: per-group writable git clone for self-improvement workflow.
   // Main group always gets one. Other groups opt in via containerConfig.devWorkspace.
+  // Layout: /workspace/dev is the parent dir; each repo lives in a subfolder.
+  //   /workspace/dev/nanobot/  <- NanoClawbster git clone
+  //   /workspace/dev/<repo>/   <- Other repos (future)
   if (isAdmin || group.containerConfig?.devWorkspace) {
     const devWorkspaceDir = path.join(DATA_DIR, 'dev', group.folder);
-    if (!fs.existsSync(devWorkspaceDir)) {
+    const nanobotDir = path.join(devWorkspaceDir, 'nanobot');
+
+    // Auto-migrate: if old flat structure exists (package.json at root but no nanobot/ subdir),
+    // move the existing clone into the nanobot/ subfolder transparently.
+    if (
+      fs.existsSync(devWorkspaceDir) &&
+      fs.existsSync(path.join(devWorkspaceDir, 'package.json')) &&
+      !fs.existsSync(nanobotDir)
+    ) {
       try {
-        execSync(`git clone "${process.cwd()}" "${devWorkspaceDir}"`, {
+        const tempDir = devWorkspaceDir + '_migrate_tmp';
+        fs.renameSync(devWorkspaceDir, tempDir);
+        fs.mkdirSync(devWorkspaceDir, { recursive: true });
+        fs.renameSync(tempDir, nanobotDir);
+        logger.info({ group: group.folder }, 'Migrated dev workspace to multi-repo layout');
+      } catch (err) {
+        logger.error({ err, group: group.folder }, 'Failed to migrate dev workspace to multi-repo layout');
+      }
+    }
+
+    // Create parent dir and clone nanobot repo if needed
+    if (!fs.existsSync(nanobotDir)) {
+      try {
+        fs.mkdirSync(devWorkspaceDir, { recursive: true });
+        execSync(`git clone "${process.cwd()}" "${nanobotDir}"`, {
           stdio: 'pipe', timeout: 60_000,
         });
         logger.info({ group: group.folder }, 'Dev workspace initialized from local clone');
@@ -111,6 +136,8 @@ function buildVolumeMounts(
         logger.error({ err, group: group.folder }, 'Failed to initialize dev workspace');
       }
     }
+
+    // Mount the parent dir as /workspace/dev so agents can add repos alongside nanobot/
     if (fs.existsSync(devWorkspaceDir)) {
       mounts.push({
         hostPath: devWorkspaceDir,
@@ -393,7 +420,7 @@ export async function runContainerAgent(
               newSessionId = parsed.newSessionId;
             }
             hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
+            // Activity detected -- reset the hard timeout
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
@@ -414,7 +441,7 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
+      // Don't reset timeout on stderr -- SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
@@ -676,7 +703,7 @@ export function writeTasksSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Exclude completed tasks — they bloat the file and agents don't need them.
+  // Exclude completed tasks -- they bloat the file and agents don't need them.
   // Main sees all non-completed tasks, others only see their own.
   const filteredTasks = tasks
     .filter((t) => t.status !== 'completed')

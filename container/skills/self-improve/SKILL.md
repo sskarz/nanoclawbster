@@ -11,12 +11,13 @@ Write features, fix bugs, and create PRs for the NanoClawbster codebase. You wor
 ## Workspace Layout
 
 ```
-/workspace/project  → Live code (READ-ONLY)
-/workspace/dev      → Git clone (READ-WRITE) — edit and test here
-/workspace/group    → Group files (READ-WRITE)
+/workspace/project        → Live code (READ-ONLY)
+/workspace/dev/nanobot    → NanoClawbster git clone (edit here for nanobot changes)
+/workspace/dev/<repo>/    → Other repos (clone with: git clone <url> /workspace/dev/<name>)
+/workspace/group          → Group files (READ-WRITE)
 ```
 
-**Never edit /workspace/project directly.** All changes happen in /workspace/dev.
+**Never edit /workspace/project directly.** All changes happen in `/workspace/dev/nanobot`.
 
 ## Step-by-Step Workflow
 
@@ -42,7 +43,7 @@ Mark each todo `in_progress` before starting it, `completed` immediately when do
 ### 1. Sync Dev Workspace
 
 ```bash
-cd /workspace/dev
+cd /workspace/dev/nanobot
 git checkout main
 git pull origin main
 npm install
@@ -57,7 +58,7 @@ git pull origin main
 ### 2. Create a Branch
 
 ```bash
-cd /workspace/dev
+cd /workspace/dev/nanobot
 git checkout -b feature/your-change-name
 ```
 
@@ -69,12 +70,12 @@ Before making changes, read the files you'll edit. Understand the existing patte
 
 ### 4. Edit and Test
 
-Make your changes in `/workspace/dev/src/` (host code) or `/workspace/dev/container/` (agent code).
+Make your changes in `/workspace/dev/nanobot/src/` (host code) or `/workspace/dev/nanobot/container/` (agent code).
 
 **Run a quick local build check before pushing:**
 
 ```bash
-cd /workspace/dev && node_modules/.bin/tsc --noEmit
+cd /workspace/dev/nanobot && node_modules/.bin/tsc --noEmit
 ```
 
 This catches type errors early. Full CI (type check, unit tests via vitest, container build) runs automatically on every PR via GitHub Actions — you do NOT need to replicate all CI checks locally.
@@ -84,7 +85,7 @@ This catches type errors early. Full CI (type check, unit tests via vitest, cont
 ### 5. Determine Changed Files
 
 ```bash
-cd /workspace/dev
+cd /workspace/dev/nanobot
 git diff --name-only   # unstaged changes
 git diff --staged --name-only   # staged changes
 ```
@@ -103,7 +104,7 @@ Use `COMPOSIO_MULTI_EXECUTE_TOOL` (NOT `COMPOSIO_EXECUTE_TOOL` — it returns 40
 
 **Important:** For large files, the content string may be too large for inline tool arguments. In that case, use git push directly:
 ```bash
-cd /workspace/dev
+cd /workspace/dev/nanobot
 git config user.email "nano@nanoclawbster.ai"
 git config user.name "Nano"
 git add src/your-file.ts
