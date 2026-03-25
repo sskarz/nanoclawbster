@@ -1,9 +1,11 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
@@ -123,6 +125,31 @@ async function runTask(
     }, TASK_CLOSE_DELAY_MS);
   };
 
+  // For delegate tasks, track whether the agent called send_message so we
+  // can send a fallback completion message if it didn't.
+  const isDelegateTask = task.id.startsWith('delegate-');
+  let agentSentMessage = false;
+  let ipcWatcher: fs.FSWatcher | null = null;
+
+  if (isDelegateTask) {
+    const ipcDir = path.join(DATA_DIR, 'ipc', task.group_folder, 'messages');
+    const ipcFilesBefore = new Set<string>();
+    try {
+      if (fs.existsSync(ipcDir)) {
+        for (const f of fs.readdirSync(ipcDir)) ipcFilesBefore.add(f);
+      }
+    } catch { /* ignore */ }
+
+    try {
+      fs.mkdirSync(ipcDir, { recursive: true });
+      ipcWatcher = fs.watch(ipcDir, (_, filename) => {
+        if (filename && filename.endsWith('.json') && !ipcFilesBefore.has(filename)) {
+          agentSentMessage = true;
+        }
+      });
+    } catch { /* ignore — fallback will just always send */ }
+  }
+
   try {
     const output = await runContainerAgent(
       group,
@@ -179,6 +206,30 @@ async function runTask(
     if (closeTimer) clearTimeout(closeTimer);
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
+  } finally {
+    if (ipcWatcher) {
+      try { ipcWatcher.close(); } catch { /* ignore */ }
+    }
+  }
+
+  // Fallback: if this is a delegate task and the agent never called
+  // send_message, deliver the result (or error) to the user so they
+  // aren't left waiting forever.
+  if (isDelegateTask && !agentSentMessage) {
+    const fallbackText = error
+      ? `Coding task failed: ${error}`
+      : result
+        ? result
+        : 'Coding task completed (no output produced).';
+    try {
+      await deps.sendMessage(task.chat_jid, fallbackText);
+      logger.info(
+        { taskId: task.id },
+        'Sent fallback completion message for delegate task (agent did not use send_message)',
+      );
+    } catch (sendErr) {
+      logger.error({ taskId: task.id, err: sendErr }, 'Failed to send fallback delegate task message');
+    }
   }
 
   const durationMs = Date.now() - startTime;

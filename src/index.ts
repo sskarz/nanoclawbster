@@ -198,7 +198,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  // Timeout setTyping to prevent hanging the entire processing pipeline
+  // if the Discord REST API stalls.
+  await Promise.race([
+    channel.setTyping?.(chatJid, true),
+    new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+  ]).catch(() => {});
   let hadError = false;
   let outputSentToUser = false;
 
@@ -235,7 +240,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  await Promise.race([
+    channel.setTyping?.(chatJid, false),
+    new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+  ]).catch(() => {});
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
