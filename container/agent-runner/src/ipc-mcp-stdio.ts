@@ -522,9 +522,13 @@ Use this when asked to make a phone call — provide the phone number and what t
     }
 
     // Build call purpose context
-    const purposeText = args.message
-      ? `${args.purpose}. Opening message: ${args.message}`
-      : args.purpose;
+    const purposeText = args.purpose;
+
+    // For outbound calls, the opening line should reflect the purpose, not the generic inbound greeting.
+    // If the caller provided a custom opening message, use it verbatim; otherwise build a natural opener.
+    const beginMessage = args.message
+      ? args.message
+      : `Hey, this is Nano calling on behalf of Sanskar. ${args.purpose}.`;
 
     // Build the request body — Retell v2 create-phone-call API
     const toNumber = args.phone_number;
@@ -535,7 +539,6 @@ Use this when asked to make a phone call — provide the phone number and what t
       override_agent_id?: string;
       agent_override?: {
         max_call_duration_ms: number;
-        begin_message?: string;
       };
       metadata?: Record<string, string>;
       retell_llm_dynamic_variables?: Record<string, string>;
@@ -549,6 +552,7 @@ Use this when asked to make a phone call — provide the phone number and what t
       },
       retell_llm_dynamic_variables: {
         call_purpose: purposeText,
+        begin_message: beginMessage,
       },
     };
 
@@ -556,7 +560,6 @@ Use this when asked to make a phone call — provide the phone number and what t
       requestBody.override_agent_id = retellAgentId;
       requestBody.agent_override = {
         max_call_duration_ms: 60000, // 60 second hard limit
-        ...(args.message ? { begin_message: args.message } : {}),
       };
     } else {
       return {
