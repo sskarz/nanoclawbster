@@ -1,61 +1,96 @@
-import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-/** Read key=value pairs from the .env file, ignoring comments and blank lines. */
-function readEnvFile(filePath: string): Record<string, string> {
-  try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const result: Record<string, string> = {};
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx === -1) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      const value = trimmed.slice(eqIdx + 1).trim();
-      const allowedKeys = [
-        'DISCORD_BOT_TOKEN',
-        'COMPOSIO_API_KEY',
-        'COMPOSIO_WEBHOOK_SECRET',
-        'ANTHROPIC_API_KEY',
-        'RETELL_API_KEY',
-        'RETELL_WEBHOOK_GROUP',
-        'WEBHOOK_PORT',
-        'ASSISTANT_NAME',
-        'FITBIT_CLIENT_ID',
-        'FITBIT_CLIENT_SECRET',
-        'FITBIT_REDIRECT_URI',
-        'FITBIT_TOKEN_PATH',
-      ];
-      if (allowedKeys.includes(key)) {
-        result[key] = value;
-      }
-    }
-    return result;
-  } catch {
-    return {};
-  }
+import { readEnvFile } from './env.js';
+
+// Read config values from .env (falls back to process.env).
+// Secrets are NOT read here — they stay on disk and are loaded only
+// where needed (container-runner.ts) to avoid leaking to child processes.
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'DISCORD_BOT_TOKEN',
+  'WEBHOOK_PORT',
+  'COMPOSIO_WEBHOOK_SECRET',
+  'COMPOSIO_WEBHOOK_URL',
+  'RETELL_API_KEY',
+  'RETELL_WEBHOOK_GROUP',
+  'FITBIT_CLIENT_ID',
+  'FITBIT_CLIENT_SECRET',
+  'FITBIT_REDIRECT_URI',
+  'FITBIT_TOKEN_PATH',
+]);
+
+export const ASSISTANT_NAME =
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+export const POLL_INTERVAL = 2000;
+export const SCHEDULER_POLL_INTERVAL = 60000;
+
+// Absolute paths needed for container mounts
+const PROJECT_ROOT = process.cwd();
+const HOME_DIR = process.env.HOME || os.homedir();
+
+// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
+export const MOUNT_ALLOWLIST_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclawbster',
+  'mount-allowlist.json',
+);
+export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
+export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+/** @deprecated Used only for DB migration backfill. Use group.isAdmin instead. */
+export const MAIN_GROUP_FOLDER = 'main';
+
+export const CONTAINER_IMAGE =
+  process.env.CONTAINER_IMAGE || 'nanoclawbster-agent:latest';
+export const CONTAINER_TIMEOUT = parseInt(
+  process.env.CONTAINER_TIMEOUT || '1800000',
+  10,
+);
+export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
+  process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
+  10,
+); // 10MB default
+export const IPC_POLL_INTERVAL = 1000;
+export const IDLE_TIMEOUT = parseInt(
+  process.env.IDLE_TIMEOUT || '1800000',
+  10,
+); // 30min default — how long to keep container alive after last result
+export const MAX_CONCURRENT_CONTAINERS = Math.max(
+  1,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
+);
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const envConfig = readEnvFile(path.join('/workspace/project', '.env'));
+export const TRIGGER_PATTERN = new RegExp(
+  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  'i',
+);
 
-export const ASSISTANT_NAME: string = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
-export const POLL_INTERVAL = 2000;
-export const IDLE_TIMEOUT = 5 * 60 * 1000;
-export const MAX_SESSION_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-export const DATA_DIR = '/workspace/project/data';
+// Timezone for scheduled tasks (cron expressions, etc.)
+// Hardcoded to PST/PDT — users are in Los Angeles regardless of server location.
+export const TIMEZONE =
+  process.env.TZ || 'America/Los_Angeles';
 
-export const DISCORD_BOT_TOKEN: string =
-  process.env['DISCORD_BOT_TOKEN'] ?? envConfig['DISCORD_BOT_TOKEN'] ?? '';
+// Discord configuration
+export const DISCORD_BOT_TOKEN =
+  process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 
-export const COMPOSIO_API_KEY: string =
-  process.env['COMPOSIO_API_KEY'] ?? envConfig['COMPOSIO_API_KEY'] ?? '';
+export const WEBHOOK_PORT: number | null = (() => {
+  const raw = process.env['WEBHOOK_PORT'] ?? envConfig['WEBHOOK_PORT'] ?? '';
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+})();
 
 export const COMPOSIO_WEBHOOK_SECRET: string =
   process.env['COMPOSIO_WEBHOOK_SECRET'] ?? envConfig['COMPOSIO_WEBHOOK_SECRET'] ?? '';
 
-export const ANTHROPIC_API_KEY: string =
-  process.env['ANTHROPIC_API_KEY'] ?? envConfig['ANTHROPIC_API_KEY'] ?? '';
+export const COMPOSIO_WEBHOOK_URL: string =
+  process.env['COMPOSIO_WEBHOOK_URL'] ?? envConfig['COMPOSIO_WEBHOOK_URL'] ?? '';
 
 export const RETELL_API_KEY: string =
   process.env['RETELL_API_KEY'] ?? envConfig['RETELL_API_KEY'] ?? '';
@@ -63,16 +98,12 @@ export const RETELL_API_KEY: string =
 export const RETELL_WEBHOOK_GROUP: string =
   process.env['RETELL_WEBHOOK_GROUP'] ?? envConfig['RETELL_WEBHOOK_GROUP'] ?? '';
 
-export const WEBHOOK_PORT: number = parseInt(
-  process.env['WEBHOOK_PORT'] ?? envConfig['WEBHOOK_PORT'] ?? '3456',
+export const MAX_SESSION_FILE_SIZE = parseInt(
+  process.env.MAX_SESSION_FILE_SIZE || '10485760',
   10,
-);
+); // 10MB default
 
-export const TRIGGER_PATTERN = new RegExp(
-  `@${ASSISTANT_NAME}`,
-  'i',
-);
-
+// Fitbit OAuth integration (optional)
 export const FITBIT_CLIENT_ID: string =
   process.env['FITBIT_CLIENT_ID'] ?? envConfig['FITBIT_CLIENT_ID'] ?? '';
 
