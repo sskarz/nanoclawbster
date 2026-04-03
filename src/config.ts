@@ -14,6 +14,10 @@ const envConfig = readEnvFile([
   'COMPOSIO_WEBHOOK_URL',
   'RETELL_API_KEY',
   'RETELL_WEBHOOK_GROUP',
+  'FITBIT_CLIENT_ID',
+  'FITBIT_CLIENT_SECRET',
+  'FITBIT_REDIRECT_URI',
+  'FITBIT_TOKEN_PATH',
 ]);
 
 export const ASSISTANT_NAME =
@@ -98,3 +102,16 @@ export const MAX_SESSION_FILE_SIZE = parseInt(
   process.env.MAX_SESSION_FILE_SIZE || '10485760',
   10,
 ); // 10MB default
+
+// Fitbit OAuth integration (optional)
+export const FITBIT_CLIENT_ID: string =
+  process.env['FITBIT_CLIENT_ID'] ?? envConfig['FITBIT_CLIENT_ID'] ?? '';
+
+export const FITBIT_CLIENT_SECRET: string =
+  process.env['FITBIT_CLIENT_SECRET'] ?? envConfig['FITBIT_CLIENT_SECRET'] ?? '';
+
+export const FITBIT_REDIRECT_URI: string =
+  process.env['FITBIT_REDIRECT_URI'] ?? envConfig['FITBIT_REDIRECT_URI'] ?? 'https://nanoclawbster.sanskar.dev/fitbit/callback';
+
+export const FITBIT_TOKEN_PATH: string =
+  process.env['FITBIT_TOKEN_PATH'] ?? envConfig['FITBIT_TOKEN_PATH'] ?? '/workspace/group/mcp-servers/node_modules/mcp-fitbit/build/.fitbit-token.json';

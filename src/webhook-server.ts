@@ -14,16 +14,28 @@
  *   5-minute freshness check on timestamp.
  */
 import crypto from 'crypto';
+import fs from 'fs';
 import http from 'http';
+import https from 'https';
+import path from 'path';
+import { URL } from 'url';
 import { logger } from './logger.js';
 
 export type WebhookEventHandler = (triggerName: string, data: unknown) => void;
 export type RetellEventHandler = (event: string, call: unknown) => void;
 
+export interface FitbitOAuthConfig {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  tokenPath: string;
+}
+
 export interface WebhookServerConfig {
   port: number;
   composio?: { secret: string; onEvent: WebhookEventHandler };
   retell?: { apiKey?: string; onEvent: RetellEventHandler };
+  fitbit?: FitbitOAuthConfig;
 }
 
 const MAX_TIMESTAMP_AGE_S = 300; // 5 minutes
@@ -134,8 +146,93 @@ function readBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<
   });
 }
 
+/** Exchange a Fitbit OAuth authorization code for tokens and save to disk. */
+function exchangeFitbitCode(
+  code: string,
+  fitbit: FitbitOAuthConfig,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const credentials = Buffer.from(`${fitbit.clientId}:${fitbit.clientSecret}`).toString('base64');
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: fitbit.redirectUri,
+    }).toString();
+
+    const options = {
+      hostname: 'api.fitbit.com',
+      path: '/oauth2/token',
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (resp) => {
+      const chunks: Buffer[] = [];
+      resp.on('data', (chunk: Buffer) => chunks.push(chunk));
+      resp.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf-8');
+        let json: Record<string, unknown>;
+        try { json = JSON.parse(raw); }
+        catch { reject(new Error(`Fitbit token response not JSON: ${raw.slice(0, 200)}`)); return; }
+
+        if (resp.statusCode !== 200) {
+          reject(new Error(`Fitbit token exchange failed (${resp.statusCode}): ${raw.slice(0, 200)}`));
+          return;
+        }
+
+        // Add expires_at for the mcp-fitbit token refresh logic
+        const expiresIn = typeof json['expires_in'] === 'number' ? json['expires_in'] : 28800;
+        json['expires_at'] = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+        // Ensure token directory exists
+        const tokenDir = path.dirname(fitbit.tokenPath);
+        try { fs.mkdirSync(tokenDir, { recursive: true }); } catch { /* ignore */ }
+
+        fs.writeFileSync(fitbit.tokenPath, JSON.stringify(json, null, 2), 'utf-8');
+        logger.info({ tokenPath: fitbit.tokenPath }, 'Fitbit token saved successfully');
+        resolve();
+      });
+    });
+
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 export function startWebhookServer(config: WebhookServerConfig): void {
   const server = http.createServer(async (req, res) => {
+    // Route: Fitbit OAuth callback (GET)
+    if (req.method === 'GET' && req.url?.startsWith('/fitbit/callback') && config.fitbit) {
+      const parsed = new URL(req.url, `http://localhost`);
+      const code = parsed.searchParams.get('code');
+      const error = parsed.searchParams.get('error');
+
+      if (error || !code) {
+        const reason = error ?? 'missing code parameter';
+        logger.warn({ reason }, 'Fitbit OAuth callback failed');
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        res.end(`<!DOCTYPE html><html><head><title>Fitbit Auth Failed</title></head><body style="font-family:sans-serif;text-align:center;padding:60px"><h2>❌ Fitbit Authorization Failed</h2><p>Reason: ${reason}</p><p>Please try again.</p></body></html>`);
+        return;
+      }
+
+      try {
+        await exchangeFitbitCode(code, config.fitbit);
+        logger.info('Fitbit OAuth flow completed successfully');
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<!DOCTYPE html><html><head><title>Fitbit Connected</title></head><body style="font-family:sans-serif;text-align:center;padding:60px"><h2>✅ Fitbit Connected Successfully!</h2><p>Your Fitbit account is now linked. You can close this tab.</p></body></html>`);
+      } catch (err) {
+        logger.error({ err }, 'Fitbit token exchange error');
+        res.writeHead(500, { 'Content-Type': 'text/html' });
+        res.end(`<!DOCTYPE html><html><head><title>Fitbit Auth Error</title></head><body style="font-family:sans-serif;text-align:center;padding:60px"><h2>❌ Fitbit Authorization Error</h2><p>Something went wrong during token exchange. Please try again.</p></body></html>`);
+      }
+      return;
+    }
+
     if (req.method !== 'POST') {
       res.writeHead(404); res.end('Not found'); return;
     }
@@ -218,5 +315,6 @@ export function startWebhookServer(config: WebhookServerConfig): void {
   const routes: string[] = [];
   if (config.composio) routes.push('/webhook/composio');
   if (config.retell) routes.push('/webhook/retell');
+  if (config.fitbit) routes.push('/fitbit/callback');
   server.listen(config.port, () => logger.info({ port: config.port, routes }, 'Webhook server listening'));
 }
