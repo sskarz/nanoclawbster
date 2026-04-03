@@ -114,4 +114,4 @@ export const FITBIT_REDIRECT_URI: string =
   process.env['FITBIT_REDIRECT_URI'] ?? envConfig['FITBIT_REDIRECT_URI'] ?? 'https://nanoclawbster.sanskar.dev/fitbit/callback';
 
 export const FITBIT_TOKEN_PATH: string =
-  process.env['FITBIT_TOKEN_PATH'] ?? envConfig['FITBIT_TOKEN_PATH'] ?? '/workspace/group/mcp-servers/node_modules/mcp-fitbit/build/.fitbit-token.json';
+  process.env['FITBIT_TOKEN_PATH'] ?? envConfig['FITBIT_TOKEN_PATH'] ?? '/workspace/group/mcp-servers/node_modules/mcp-fitbit/.fitbit-token.json';
