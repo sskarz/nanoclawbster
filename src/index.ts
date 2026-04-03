@@ -7,6 +7,10 @@ import {
   DATA_DIR,
   DISCORD_BOT_TOKEN,
   IDLE_TIMEOUT,
+  FITBIT_CLIENT_ID,
+  FITBIT_CLIENT_SECRET,
+  FITBIT_REDIRECT_URI,
+  FITBIT_TOKEN_PATH,
   MAX_SESSION_FILE_SIZE,
   POLL_INTERVAL,
   RETELL_API_KEY,
@@ -742,6 +746,12 @@ async function main(): Promise<void> {
           logger.info({ direction, fromNumber, chatJid: targetJid }, 'Retell call event stored in conversation history');
         },
       },
+      fitbit: (FITBIT_CLIENT_ID && FITBIT_CLIENT_SECRET) ? {
+        clientId: FITBIT_CLIENT_ID,
+        clientSecret: FITBIT_CLIENT_SECRET,
+        redirectUri: FITBIT_REDIRECT_URI,
+        tokenPath: FITBIT_TOKEN_PATH,
+      } : undefined,
     });
   } else {
     logger.info('Webhook server not started (WEBHOOK_PORT not configured)');
