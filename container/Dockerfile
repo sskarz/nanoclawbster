@@ -47,13 +47,18 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Store a hash of the source files so the entrypoint can detect if src has changed at runtime
+# If src is unchanged (common case), entrypoint skips recompilation and uses /app/dist directly (~15s saved)
+RUN find /app/src -type f -name "*.ts" | sort | xargs md5sum | md5sum | cut -d' ' -f1 > /app/.src-hash
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+# If source files are unchanged from build time, use pre-built /app/dist to skip ~15s tsc recompilation
+RUN printf '#!/bin/bash\nset -e\nBUILD_HASH=$(cat /app/.src-hash 2>/dev/null || echo "")\nRUNTIME_HASH=$(find /app/src -type f -name "*.ts" | sort | xargs md5sum 2>/dev/null | md5sum | cut -d'"'"' '"'"' -f1)\nif [ "$BUILD_HASH" = "$RUNTIME_HASH" ] && [ -f /app/dist/index.js ]; then\n  DIST=/app/dist\nelse\n  cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\n  ln -s /app/node_modules /tmp/dist/node_modules\n  chmod -R a-w /tmp/dist\n  DIST=/tmp/dist\nfi\ncat > /tmp/input.json\nnode $DIST/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
