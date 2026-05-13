@@ -65,6 +65,10 @@ let messageLoopRunning = false;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+// Typing intervals for piped-message path (warm containers receiving follow-up messages).
+// Keyed by chatJid. Cleared when the agent signals success/error in the streaming callback.
+const pipedTypingIntervals = new Map<string, ReturnType<typeof setInterval>>();
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -242,6 +246,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
 
       if (result.status === 'success') {
+        // Clear any piped-message typing interval — agent is done
+        const pipedInterval = pipedTypingIntervals.get(chatJid);
+        if (pipedInterval) {
+          clearInterval(pipedInterval);
+          pipedTypingIntervals.delete(chatJid);
+        }
         if (isSystemOnlyBatch) {
           // Close container promptly — no user to wait for
           setTimeout(() => queue.closeStdin(chatJid), 10_000);
@@ -251,6 +261,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
 
       if (result.status === 'error') {
+        // Clear any piped-message typing interval on error too
+        const pipedInterval = pipedTypingIntervals.get(chatJid);
+        if (pipedInterval) {
+          clearInterval(pipedInterval);
+          pipedTypingIntervals.delete(chatJid);
+        }
         hadError = true;
       }
     });
@@ -504,10 +520,19 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
-            // Show typing indicator while the container processes the piped message
-            channel.setTyping?.(chatJid, true)?.catch((err) =>
-              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-            );
+            // Keep typing indicator alive every 8s for piped messages too.
+            // Cleared in the streaming callback when result.status is success/error.
+            if (channel.setTyping) {
+              channel.setTyping(chatJid, true).catch(() => {});
+              const existing = pipedTypingIntervals.get(chatJid);
+              if (existing) clearInterval(existing);
+              pipedTypingIntervals.set(
+                chatJid,
+                setInterval(() => {
+                  channel.setTyping!(chatJid, true).catch(() => {});
+                }, 8000),
+              );
+            }
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
