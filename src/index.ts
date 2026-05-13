@@ -208,41 +208,56 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     channel.setTyping?.(chatJid, true),
     new Promise<void>((resolve) => setTimeout(resolve, 5000)),
   ]).catch(() => {});
+
+  // Keep the typing indicator alive every 8s — Discord clears it after ~10s.
+  // Cleared in the finally block so it always stops, even on errors.
+  const typingInterval = channel.setTyping
+    ? setInterval(() => {
+        channel.setTyping!(chatJid, true).catch(() => {});
+      }, 8000)
+    : null;
+
   let hadError = false;
   let outputSentToUser = false;
+  let output: Awaited<ReturnType<typeof runAgent>>;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
+  try {
+    output = await runAgent(group, prompt, chatJid, async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+        if (text) {
+          if (isSystemOnlyBatch) {
+            logger.debug({ group: group.name }, `Suppressed agent text for system-only batch: ${text.slice(0, 120)}`);
+          } else {
+            await channel.sendMessage(chatJid, text);
+            outputSentToUser = true;
+          }
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
+      }
+
+      if (result.status === 'success') {
         if (isSystemOnlyBatch) {
-          logger.debug({ group: group.name }, `Suppressed agent text for system-only batch: ${text.slice(0, 120)}`);
+          // Close container promptly — no user to wait for
+          setTimeout(() => queue.closeStdin(chatJid), 10_000);
         } else {
-          await channel.sendMessage(chatJid, text);
-          outputSentToUser = true;
+          queue.notifyIdle(chatJid);
         }
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      if (isSystemOnlyBatch) {
-        // Close container promptly — no user to wait for
-        setTimeout(() => queue.closeStdin(chatJid), 10_000);
-      } else {
-        queue.notifyIdle(chatJid);
+      if (result.status === 'error') {
+        hadError = true;
       }
-    }
-
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+    });
+  } finally {
+    // Always clear the interval — stops typing indicator immediately after response (or on error)
+    if (typingInterval) clearInterval(typingInterval);
+  }
 
   await Promise.race([
     channel.setTyping?.(chatJid, false),
@@ -250,7 +265,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   ]).catch(() => {});
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (output! === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
